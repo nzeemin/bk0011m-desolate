@@ -1,0 +1,3092 @@
+; pdpy11 specific things
+.extern all
+
+; Game main loop
+;
+MAIN_LOOP:
+	MOVB	@#VAR_HP, R0	; Get Health
+	BNE	MAIN_LOOP1
+	JMP	LB9A2		; zero => Player is dead
+MAIN_LOOP1:
+	CALL	LADE5		; Decode current room to SCR_TILES; HL = SCR_TILES
+	CALL	LA88F		; Display 96 tiles on the screen
+	CALL	LB96B		; Display Health
+	CALL	LB8EA		; Show look/shoot selection indicator
+	CALL	LB76B		; Process shoot
+	CALL	LB551		; Process Alien in the room
+; Process keys
+	CLR	@#KEYSTO	; Clear stored key
+	CALL	LA0F1		; Scan keyboard
+	BEQ	MAIN_LOOPE		; no key => skip the analysis
+	CMP	R0, #004	; Up key?
+	BEQ	L9DMUP
+	CMP	R0, #001	; Down key?
+	BEQ	L9DMDN
+	CMP	R0, #002	; Left key?
+	BEQ	L9DMLT
+	CMP	R0, #003	; Right key?
+	BEQ	L9DMRT
+	CMP	R0, #15.	; Menu key?
+	BEQ	L9DMNU
+	MOV	R0, @#KEYSTO	; store key pressed for the game loop end
+;DEBUG
+;	MOV	@#KEYSTO, R3
+;	MOV	#73020, @#PEN_COL	; Set penRow/penCol
+;	MOV	R0, R3
+;	CALL	DRNUM5
+MAIN_LOOPE:	JMP	LA8C6		; Draw the Player, then go to the Ending of main game loop
+;
+L9DMDN: JMP	LA966		; 001 Move down
+L9DMLT:	JMP	LA9EB		; 002 Move left
+L9DMRT:	JMP	LAA1A		; 003 Move right
+L9DMUP:	JMP	LA99B		; 004 Move up
+L9DLST:	JMP	LAAAF		; 005 Look / Shoot
+L9DINV:	JMP	LB0A2		; 006 Open the Inventory
+L9DSWI:	JMP	LB930		; 010 Look / Shoot Mode switch
+L9DMNU:	JMP	MENUFG		; Retrun to main Menu
+KEYSTO: .WORD	0		; Key pressed stored for the game loop
+;
+; Ending of main game loop
+L9E19:
+	CALL	LB653		; Draw Alien
+	MOV	@#KEYSTO, R0	; get key not processed yet
+	BNE	L9E192
+	CALL	LA0F1		; Scan keyboard
+L9E192:	CMP	R0, #005	; Look/shoot key?
+	BEQ	L9DLST
+	CMP	R0, #010	; Switch key?
+	BEQ	L9DSWI
+	CMP	R0, #006	; Inventory key?
+	BEQ	L9DINV
+; Show the screen, continue the game main loop
+L9E2E:
+	CALL	SHOWSC		; Copy shadow screen to UKNC screen
+	BR	MAIN_LOOP		; continue main game loop
+;
+; Quit menu item selected
+L9E51:
+	CALL	STHEMN		; ScreenThemeNite
+	CALL	BLANK_SCR		; Clear shadow screen and copy on UKNC screen
+	CALL	DRSTR3
+	.WORD	30024		; penRow/penCol
+	.WORD	SQUIT
+	CALL	SHOWSC
+	CALL	WTKEY
+;	CALL	STHEML		; ScreenThemeLite
+	CALL	BLANK_SCR		; Clear and show shadow screen
+;	JMP	LBA3D		; Return to Menu
+	JMP	FINISH
+;
+; Put tile on the screen (NOT aligned to 8px column), 16x16 -> 16x16 on shadow screen
+; Uses XOR operation so it is revertable.
+;   R3 = row; R2 = X coord; R1 = height; R4 = tile address
+L9E5F:
+	ADD	R3, R3
+	MOV	MUL24D(R3), R3	; R3 = row * 24
+	MOV	R2, R5		; get X coord, pixels
+	BIC	#177770, R5	; offset within 8px column, 0..7
+	ASR	R2
+	ASR	R2
+	ASR	R2		; R2 = number of 8px column
+	ADD	R2, R3		; now R3 = offset on the shadow screen
+	ADD	#SHADOW, R3	; R3 = address in the shadow screen
+L9E8D:				; loop by R1 - by rows
+	PUSH	R1
+	MOV	(R4)+, R0	; get tile bits
+	CLR	R2
+	MOV	R5, R1		; get shift
+	BEQ	L9E9D		; shift 0 => skip all shift ops
+L9E96:				; shift bits
+	ASL	R0
+	ROLB	R2
+	SOB	R1, L9E96
+L9E9D:
+	CLR	R1
+	BISB	(R3)+, R1	; get 1st byte
+	SWAB	R1
+	BISB	(R3), R1	; get 2nd byte
+	SWAB	R1
+	DEC	R3		; back to 1st byte
+	XOR	R0, R1
+	MOVB	R1, (R3)+	; put 1st byte
+	SWAB	R1
+	MOVB	R1, (R3)+	; put 2nd byte
+	MOVB	(R3), R1	; get 3rd byte
+	XOR	R2, R1
+	MOVB	R1, (R3)	; put 3rd byte
+	ADD	#22., R3
+	POP	R1
+	SOB	R1, L9E8D	; continue loop by rows
+	RTS PC
+;
+; Put background tile on the screen, 16x16 -> 16x16 on shadow screen, no mask
+;   R3 = row; R2 = tile column 0..11; R4 = tile address
+L9EAD:
+	ADD	R3, R3
+	MOV	MUL24D(R3), R3	; R3 = row * 24
+	ADD	R2, R3
+	ADD	R2, R3
+	ADD	#SHADOW, R3	; now R3 = shadow screen address
+	MOV	#4., R1		; 4 * 4 = 16. rows
+	MOV	#24., R2	; line increment
+L9EAD1:
+	MOV	(R4)+, (R3)	; 1st line
+	ADD	R2, R3		; next line
+	MOV	(R4)+, (R3)	; 2nd line
+	ADD	R2, R3		; next line
+	MOV	(R4)+, (R3)	; 3rd line
+	ADD	R2, R3		; next line
+	MOV	(R4)+, (R3)	; 4th line
+	ADD	R2, R3		; next line
+; Continue the loop
+	SOB	R1, L9EAD1
+	RTS PC
+;
+; Draw sprite
+;   R4 = sprite address; R2 = column 0..23; R3 = row
+;   R0 = (was: bits 0..5 - sub-sprite); bit7=1 - reflect horz (was: bit6=1 - reflect vert)
+L9EDE:
+; Copy the sprite to the buffer
+	MOV	#L9FAF, R5
+	MOV	#8., R1
+L9EDE1:	MOV	(R4)+, (R5)+
+	MOV	(R4)+, (R5)+
+	MOV	(R4)+, (R5)+
+	MOV	(R4)+, (R5)+
+	SOB	R1, L9EDE1
+; Reflect the bits if needed
+	BIT	#200, R0
+	BEQ	L9EDE2
+	CALL	L9EDER		; Reflect sprite horizontally
+L9EDE2:
+	ADD	R3, R3
+	MOV	MUL24D(R3), R3	; R3 = row * 24
+	ADD	R2, R3
+	ADD	#SHADOW, R3
+	MOV	#L9FAF, R4
+; Copying to the shadow screen
+	MOV	#8., R1		; 8 row pairs
+	MOV	#24., R2	; line increment
+L9EDE3:
+; 1st line
+	MOV	(R3), R0	; get shadow screen bits
+	BIC	(R4)+, R0	; apply mask
+	BIS	(R4)+, R0	; use pixels
+	MOV	R0, (R3)	; write the result
+	ADD	R2, R3		; next line
+; 2nd line
+	MOV	(R3), R0	; get shadow screen bits
+	BIC	(R4)+, R0	; apply mask
+	BIS	(R4)+, R0	; use pixels
+	MOV	R0, (R3)	; write the result
+	ADD	R2, R3		; next line
+; Contine the loop
+	SOB	R1, L9EDE3
+	RTS PC
+L9FAF:
+	.BLKB	64.
+;
+; Horizontal reflection
+L9EDER:
+	MOV	#L9FAF, R5
+	MOV	#32., R4
+L9EDES:
+; Обменять мл/ст байты слова (R5), отразив оба байта
+	MOV	(R5), R0
+	MOV	R0, R1
+	BIC	#177400, R0		; оставляем мл байт
+	MOVB	FLIPAR(R0), R0		; отражаем байт через таблицу
+	BIC	#177400, R0		; убираем возможное расширение знака
+	SWAB	R1
+	BIC	#177400, R1		; оставляем мл байт
+	MOVB	FLIPAR(R1), R1		; отражаем байт через таблицу
+	SWAB	R0
+	BISB	R1, R0
+	MOV	R0, (R5)+		; записываем результат и к следующему слову
+; Продолжение цикла
+	SOB	R4, L9EDES
+	RTS PC
+;
+; Copy shadow screen to screen
+;
+; pdpy11 doesn't like it
+;L9FEA=SHOWSC
+;
+; Clear shadow screen
+; 128+12 lines, 24 8px columns; 24 * 140 = 3360 bytes
+CLSHAD:
+L9FCF:	MOV	#140., R1		; line count
+	MOV	#SHADOW, R3
+L9FCF1:	CLR	(R3)+			; bytes 0-1
+	CLR	(R3)+			; 2-3
+	CLR	(R3)+			; 4-5
+	CLR	(R3)+			; 6-7
+	CLR	(R3)+			; 8-9
+	CLR	(R3)+			; 10-11
+	CLR	(R3)+			; 12-13
+	CLR	(R3)+			; 14-15
+	CLR	(R3)+			; 16-17
+	CLR	(R3)+			; 18-19
+	CLR	(R3)+			; 20-21
+	CLR	(R3)+			; 22-23
+	SOB	R1, L9FCF1
+	RTS PC
+
+; Scan keyboard
+; RTS PCs key in A; Z=0 for key, Z=1 for no key
+;
+LA0F1:
+	CALL	GETKEY
+	BEQ	LA0F1R		; No key => return
+; Анализ нажатой клавиши
+	CMP #012, R0 ; Hack to recognize "Enter" key
+	BEQ KEY_FIRE
+	CMP	#040, R0	; Клавиша пробел?
+	BNE	LA0F11
+KEY_FIRE:
+	MOV	#005, R0
+	RTS PC
+LA0F11:	CMP	#33, R0	; Клавиша вниз?
+	BNE	LA0F12
+	MOV	#001, R0
+	RTS PC
+LA0F12:	CMP	#10, R0	; Клавиша влево?
+	BNE	LA0F13
+	MOV	#002, R0
+	RTS PC
+LA0F13:	CMP	#31, R0	; Клавиша вправо?
+	BNE	LA0F14
+	MOV	#003, R0
+	RTS PC
+LA0F14:	CMP	#32, R0	; Клавиша вверх?
+	BNE	LA0F15
+	MOV	#004, R0
+	RTS PC
+LA0F15:	CMP	#111, R0	; Inventory key? 'I'
+	BNE	LA0F16
+	MOV	#006, R0
+	RTS PC
+LA0F16:	CMP	#121, R0
+	BNE	LA0F17
+	MOV	#010, R0
+	RTS PC
+LA0F17:	CMP	#120, R0	; Menu key? 'P'
+	BNE	LA0F18
+	MOV	#15., R0
+	RTS PC
+; All other keys = Escape
+LA0F18:
+	MOV	#007, R0
+LA0F1R:	RTS PC
+;
+; Display 96 tiles on the screen with background tiles (Tileset1)
+;   R3 = Address where the 96 tiles are placed
+LA88F:
+	CLR	R1		; col
+	CLR	R2		; row
+LA892:	PUSH	R1
+	PUSH	R3
+	PUSH	R2
+	MOVB	(R3), R4
+	BEQ	LA8B0		; empty tile? => skip it
+	CMP	R4, #107	; menu background tile?
+	BNE	LA8921		; no => skip
+LA88F2:	ADD	#000, R4	; add phase 000..007
+LA8921:	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4		; now R4 = tile * 32
+	ADD	#TILES1, R4
+	MOV	R2, R3		; row
+	MOV	R1, R2		; col
+	CALL	L9EAD		; Put tile; R3 = row; R2 = col; R4 = tile address
+LA8B0:	POP	R2
+	POP	R3
+	POP	R1
+	INC	R3		; next tile
+	INC	R1		; next col
+	CMP	R1, #12.	; was last column?
+	BNE	LA892		; no => continue the loop
+	CLR	R1
+	ADD	#16., R2	; next row
+	CMPB	#128., R2	; was last tile row?
+	BNE	LA892		; no => continue the loop
+	RTS PC
+LDC55=LA88F2+2		; Menu background phase: 000..007
+;
+LA8C6:
+	CLRB	@#LDD54		; clear animation phase
+;
+; Draw Player tiles
+LA8CD:
+	MOVB	@#LDD55, R0	; get shooting flag
+	BEQ	LA8DF		; shooting animation? no => jump
+	MOV	#LDE87, R3	; Table with Player's tile numbers
+	MOVB	@#LDB75, R0	; Direction/orientation
+	ADD	R0, R0
+	ADD	R0, R0		; now R0 = Direction * 4
+	BR	LA8E9
+LA8DF:				; Shooting animation
+	MOV	#LDE47, R3	; Table with Player's tile numbers
+	MOVB	@#LDB75, R0	; Direction/orientation
+	ADD	R0, R0
+	ADD	R0, R0
+	ADD	R0, R0
+	ADD	R0, R0		; now R0 = Direction * 16
+LA8E9:
+	ADD	R0, R3
+	MOVB	@#LDD54, R0	; get animation phase
+	ADD	R0, R0
+	ADD	R0, R0		; now R0 = phase * 4
+	ADD	R0, R3
+	MOV	#4, R1		; 4 sprites
+LA8F8:				; loop by R1
+	MOVB	(R3)+, R4	; get sprite number
+	PUSH	R3
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4		; R4 = sprite * 64
+	ADD	#SPRITE, R4	; now R4 = sprite address
+	CALL	LA92E
+	PUSH	R1
+	CALL	LA956		; if looking left - set C bit7=1 to reflect tile horizontal
+	MOV	R1, R0
+	CALL	L9EDE		; Draw sprite R4; R2 = column; R3 = row
+	POP	R1
+	POP	R3
+	SOB	R1, LA8F8	; continue loop by tiles
+	MOVB	@#LDD54, R0	; get animation phase 0..3
+	CMP	R0, #003	; was last phase?
+	BEQ	LA927		; yes => jump
+	INC	R0		; next phase
+	MOVB	R0, @#LDD54	; set animation phase
+	CLRB	@#LDD55		; clear shooting flag for player's animation
+	JMP	L9E19		; Go to ending of main game loop
+LA927:
+	CLRB	@#LDD54		; clear animation phase
+	JMP	L9E19		; Go to ending of main game loop
+;
+LA92E:
+	MOVB	@#LDB76, R2	; get X coord in tiles 0..11
+	ADD	R2, R2		; now coord in 8px columns
+	MOVB	@#LDB77, R3	; get Y coord in lines
+	SUB	#16., R3
+	CMP	R1, #4		; sprite #1?
+	BEQ	LA949		; yes => return
+	CMP	R1, #3		; sprite #2?
+	BNE	LA94C		;
+LA941:
+	MOVB	@#LDB75, R0	; Direction/orientation
+	CMPB	R0, #002	; left?
+	BEQ	LA94A
+	ADD	#2, R2		; right
+LA949:	RTS PC
+LA94A:
+	SUB	#2, R2		; left
+	RTS PC
+LA94C:
+	ADD	#16., R3
+	CMP	R1, #1		; sprite #4?
+	BEQ	LA941
+	RTS PC
+;
+LA956:
+	CLR	R1
+	MOVB	@#LDB75, R0	; Direction/orientation
+	BEQ	LA956R
+	CMP	R0, #001
+	BEQ	LA956R
+	CMP	R0, #003
+	BEQ	LA956R
+	MOV	#200, R1
+LA956R:	RTS PC
+
+;
+; Move Down
+LA966:
+	TSTB	@#LDB75		; Direction/orientation
+	BEQ	LA97C		; down? => jump
+	TSTB	@#LDB7D		; look/shoot switch
+	BEQ	LA97C		; look mode => jump
+	CLRB	@#LDB75		; set Direction/orientation = down
+	JMP	LA8C6		; Proceed to Draw the Player
+LA97C:
+	CLRB	@#LDB75		; set Direction/orientation = down
+	CALL	LAA60		; get byte from the room after movement
+	CMP	R0, #001	; free block?
+	BEQ	LA97C1		; yes => move
+	JMP	LA8CD
+LA97C1:	MOVB	@#LDB77, R0	; get Y pixel coord
+	PUSH	R0
+	ADD	#16., R0	; Down one tile
+	MOVB	R0, @#LDB77	; set Y pixel coord
+	MOVB	@#LDB78, R0	; get Y tile coord
+	PUSH	R0
+	INC	R0		; down one tile
+	MOVB	R0, @#LDB78	; set Y tile coord
+	BR 	LA9D1
+;
+; Move Up
+LA99B:
+	MOVB	@#LDB75, R0	; Direction/orientation
+	CMP	R0, #001	; up?
+	BEQ	LA9B3
+	TSTB	@#LDB7D		; look/shoot switch
+	BEQ	LA9B3		; look mode => jump
+	MOVB	#001, @#LDB75	; set Direction/orientation = up
+	JMP	LA8C6		; Proceed to Draw the Player
+LA9B3:
+	MOVB	#001, @#LDB75	; set Direction/orientation = up
+	CALL	LAA60		; get byte from the room after movement
+	CMP	R0, #001
+	BEQ	LA9B31
+	JMP	LA8CD
+LA9B31:	MOVB	@#LDB77, R0	; get Y pixel coord
+	PUSH	R0
+	SUB	#16., R0	; Up one tile
+	MOVB	R0, @#LDB77	; set Y pixel coord
+	MOVB	@#LDB78, R0	; get Y tile coord
+	PUSH	R0
+	DEC	R0		; up one tile
+	MOVB	R0, @#LDB78	; set Y tile coord
+; Moved down or up, check for Alien
+LA9D1:
+	TSTB	@#LDB84		; Alien still alive?
+	BEQ	LA9E6		; dead => jump
+	CALL	LB72E		; Get value at offset $2F in the room description
+	BEQ	LA9E6		; no alien => jump
+; We have an alien in the room
+	CALL	LB74C
+	BNE	LA9E6
+	JMP	LB07B		; Alien in the same cell as Player? => Decrease Health by 4, restore X coord
+LA9E6:
+	POP	R0
+	POP	R0
+	JMP	LA8CD
+;
+; Move Left
+LA9EB:
+	MOVB	@#LDB75, R0	; Direction/orientation
+	CMP	R0, #002	; up?
+	BEQ	LAA03
+	TSTB	@#LDB7D		; look/shoot switch
+	BEQ	LAA03		; look mode => jump
+	MOVB	#002, @#LDB75	; set Direction/orientation = left
+	JMP	LA8C6		; Proceed to Draw the Player
+LAA03:
+	MOVB	#002, @#LDB75	; set Direction/orientation = left
+	CALL	LAA60		; get byte from the room after movement
+	CMP	R0, #001
+	BEQ	LAA031
+	JMP	LA8CD
+LAA031:	MOVB	@#LDB76, R0	; get X coord in tiles
+	PUSH	R0
+	DEC	R0		; one tile left
+	MOVB	R0, @#LDB76	; set X coord in tiles
+	BR	LAA47		; go to Alien check
+;
+; Move Right
+LAA1A:
+	MOVB	@#LDB75, R0	; Direction/orientation
+	CMP	R0, #003	; up?
+	BEQ	LAA32
+	TSTB	@#LDB7D		; look/shoot switch
+	BEQ	LAA32		; look mode => jump
+	MOVB	#003, @#LDB75	; set Direction/orientation = right
+	JMP	LA8C6		; Proceed to Draw the Player
+LAA32:
+	MOVB	#003, @#LDB75	; set Direction/orientation = right
+	CALL	LAA60		; get byte from the room after movement
+	CMP	R0, #001
+	BEQ	LAA321
+	JMP	LA8CD
+LAA321:	MOVB	@#LDB76, R0	; get X coord in tiles
+	PUSH	R0
+	INC	R0		; one tile right
+	MOVB	R0, @#LDB76	; set X coord in tiles
+; Moved left or right, check for Alien
+LAA47:
+	TSTB	@#LDB84		; Alien still alive?
+	BEQ	LAA5C		; dead => skip
+	CALL	LB72E		; Get value at offset $2F in the room description
+	BEQ	LAA5C		; no Alien => jump
+; We have an alien in the room
+	CALL	LB74C
+	BNE	LAA5C
+	JMP	LB08D		; Alien in the same cell as Player? => Decrease Health by 4, restore X coord
+LAA5C:
+	POP	R0
+	JMP	LA8CD
+;
+; Get byte from the room at position after the movement
+;   R3 = byte from the room
+LAA60:
+	CALL	LADE5		; Decode current room to SCR_TILES; R3 = SCR_TILES
+	MOVB	@#LDB76, R2	; get X coord in tiles
+	CALL	LAA7D		; For direction left - dec R2, right - inc R2
+	ADD	R2, R3
+	MOVB	@#LDB78, R1	; Get Y tile coord
+	CALL	LAA8D		; For direction up - dec R1, down - inc R1
+;
+LAA78:	MOVB	MUL12D(R1), R1	; multiply by 12
+	ADD	R1, R3		; now R3 = address in the room
+	MOVB	(R3), R0	; get byte from the room
+	RTS PC
+;
+; For direction left - dec R2, right - inc R2
+LAA7D:
+	MOVB	@#LDB75, R0	; Direction/orientation
+	BEQ	LAA7DR		; down? => return
+	CMP	R0, #001	; up?
+	BEQ	LAA7DR		; => return
+	CMP	R0, #002	; left?
+	BNE	LAA8B
+	DEC	R2		; going left 1 tile
+	RTS PC
+LAA8B:	INC	R2		; going right 1 tile
+LAA7DR:	RTS PC
+;
+; For direction up - dec R1, down - inc R1
+LAA8D:
+	MOVB	@#LDB75, R0	; Direction/orientation
+	BNE	LAA8D1		; down?
+	INC	R1		; going down 1 tile
+	RTS PC
+LAA8D1:	CMP	R0, #001	; up?
+	BNE	LAA8DR
+	DEC	R1		; going up 1 tile
+LAA8DR:	RTS PC
+;
+; Get room offset in tiles for X = LDB76, Y = LDB78
+;   Returns the room offset in R0 and LDC56
+LAA9D:
+	MOVB	@#LDB78, R0	; get Y tile coord
+	MOVB	MUL12D(R0), R0	; multiply by 12
+	MOVB	@#LDB76, R2	; get X tile coord 0..11
+	ADD	R2, R0
+	MOVB	R0, @#LDC56	; (LDC56) = Y * 12 + X
+	RTS PC
+;
+; Look / Shoot key pressed
+LAAAF:
+	TSTB	@#LDB7D		; look/shoot switch value
+	BEQ	LAAAF1		; look => jump
+	JMP	LB758		; shoot
+; Look action
+LAAAF1:
+	CLRB	@#LDC88		; clear current offset
+	CALL	LAA9D		; Get room offset in tiles for X = LDB76, Y = LDB78
+	CALL	LAE09		; Decode current room description to SCR_TILES
+LAAC1:
+	MOVB	(R3), R1
+	MOVB	@#LDC56, R0
+	SUB	R1, R0
+	BEQ	LAADD		; found the action point for the current position
+	MOVB	@#LDC88, R0	; get current offset
+	CMP	R0, #061
+	BEQ	LAADA		; => Show the screen, continue the game main loop
+	INC	R0
+	MOVB	R0, @#LDC88	; set current offset
+	INC	R3
+	BR	LAAC1
+; Show the screen, continue the game main loop
+LAADA:
+	JMP	L9E2E		; Show the screen, continue the game main loop
+; Found the action point for the current position in the room description
+LAADD:
+	MOVB	@#LDC88, R0	; get current offset in the room description
+	BEQ	LAB3F
+	CMP	R0, #001
+	BEQ	LAB3F
+	CMP	R0, #003
+	BEQ	LABA4
+	CMP	R0, #004
+	BEQ	LABA4
+	CMP	R0, #031
+	BEQ	LABBE
+	CMP	R0, #032
+	BEQ	LABBE
+	CMP	R0, #041
+	BEQ	LAADD4
+	CMP	R0, #042
+	BEQ	LAADD4
+	CMP	R0, #006
+	BEQ	LAADD5
+	CMP	R0, #007
+	BEQ	LAADD5
+	CMP	R0, #013
+	BEQ	LAADD6
+	CMP	R0, #014
+	BEQ	LAADD6
+	CMP	R0, #017
+	BEQ	LAADD7
+	CMP	R0, #020
+	BEQ	LAADD7
+	JMP	L9E2E		; Show the screen, continue the game main loop
+;
+LAADD4:	JMP	LAC05
+LAADD5:	JMP	LAC54
+LAADD6:	JMP	LACE3
+LAADD7:	JMP	LBC8B
+;
+; Show small message popup
+LAB28:
+	PUSH	R1
+	PUSh	R2
+	MOV	#LEB27, R3	; Decode from: Small message popup
+	CALL	LADEE		; Decode 96 bytes of the screen to SCR_TILES
+	CALL	DRAW_TILESET2		; Display screen HL from tiles with Tileset2
+	POP	R2
+	POP	R1
+	RTS PC
+;
+; Found action point at room description offset $00..$01
+LAB3F:
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	MOV	#002, R2	; offset in the room description
+	CALL	LAC4C		; Compare byte at (R3+R2) with Direction/orientation LDB75
+	BEQ	LAB3F1
+	JMP	LAADA		; => Show the screen, continue the game main loop
+LAB3F1:	CMPB	@#LDB79, #27.	; Room #27 ?
+	BNE	LAB7A		; no => jump
+; Room #27
+	TSTB	@#LDCF7		; Weapon - do we have it?
+	BNE	LAB7A		; have weapon => jump
+	MOVB	#22., @#LDCF3	; Left margin size for text
+	MOVB	#14., @#LDCF4	; Line interval for text
+	CALL	LAB28		; Show small message popup
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	54020		; penRow/penCol
+	.WORD	SE0D5		; "It is not wise to proceed without a weapon."
+	JMP	LAD8C		; Show screen and wait for Escape key
+;
+;NOTE: Procedure LAB73 removed, not used anymore
+;
+LAB7A:
+	MOVB	#001, @#LDC8A	; Direction to other room = down
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	MOV	#034, R2	; offset in the room description - access level
+LAB85:
+	ADD	R2, R3
+	MOVB	(R3), @#LDC8C	; Set Access code level
+	ADD	#007, R3	; R3 = $1C+7=$23 - offset for room number
+	MOVB	(R3), @#LDC86	; store new room number
+	ADD	#004, R3	; R3 = $1C+7+4=$27 - offset for Access code slot
+	MOVB	(R3), @#LDC8B	; set Access code slot number
+	TSTB	@#LDC8C		; Level 0?
+	BNE	LAB851
+	JMP	LB00E		; yes => Going to the next room
+LAB851:	JMP	LAE23		; Check access and show Door Lock
+;
+; Found action point at room description offset $03..$04
+LABA4:
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	MOV	#005, R2	; offset in the room description - direction
+	CALL	LAC4C		; Compare byte at (HL+DE) with Direction/orientation LDB75
+	BEQ	LABA41
+	JMP	LAADA		; => Show the screen, continue the game main loop
+LABA41:	MOVB	#002, @#LDC8A	; Direction to other room = up
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	MOV	#29., R2	; offset in the room description
+	BR	LAB85
+;
+; Found action point at room description offset $19..$1A
+LABBE:
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	MOV	#27., R2	; offset in the room description - direction byte
+	CALL	LAC4C		; Compare byte at (R3+R2) with Direction/orientation LDB75
+	BEQ	LABBE1
+	JMP	LAADA		; => Show the screen, continue the game main loop
+LABBE1:	CMPB	@#LDB79, #33.	; Room #33?
+	BNE	LABF7
+; Room #33
+	MOV	#004, R2
+	CALL	LB531		; Get value (LDB90+R2)
+	BNE	LABF7
+	MOVB	#16., @#LDCF3	; Left margin size for text
+	MOVB	#14., @#LDCF4	; Line interval for text
+	CALL	LAB28		; Show small message popup
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	54014		; penRow/penCol
+	.WORD	SE0D7		; "You cant enter that sector Life-Support is offline."
+	JMP	LAD8C		; Show screen and wait for Escape key
+LABF7:
+	MOVB	#003, @#LDC8A	; Direction to other room = left
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	MOV	#30., R2	; offset in the room description
+	JMP	LAB85
+;
+; Found action point at room description offset $21..$22 (possibly an error, should be $20-$21)
+LAC05:
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	MOV	#042, R2	; offset in the room description
+	CALL	LAC4C		; Compare byte at (HL+DE) with Direction/orientation LDB75
+	BEQ	LAC051
+	JMP	LAADA		; => Show the screen, continue the game main loop
+LAC051:	CMPB	@#LDB79, #69.	; Room #69?
+	BNE	LAC3E		; no => jump
+; Room #69
+	MOV	#005, R2
+	CALL	LB531		; Get value (LDB90+R2)
+	BNE	LAC3E
+	MOVB	#12., @#LDCF3	; Left margin size for text
+	MOVB	#14., @#LDCF4	; Line interval for text
+	CALL	LAB28		; Show small message popup
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	54024		; penRow/penCol
+	.WORD	SE0D9		; "You cant enter until the AirLock is re-pressurised"
+	JMP	LAD8C		; Show screen and wait for Escape key
+LAC3E:
+	MOVB	#004, @#LDC8A	; Direction to other room = right
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	MOV	#037, R2	; offset in the room description
+	JMP	LAB85
+;
+; Compare byte at (HL+DE) with Direction/orientation LDB75
+LAC4C:
+	ADD	R2, R3
+	MOVB	(R3), R1
+	MOVB	@#LDB75, R0
+	SUB	R1, R0
+	RTS PC
+;
+; Found action point at room description offset $06..$07
+LAC54:
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	ADD	#8., R3		; offset in the room description
+	MOVB	(R3), R1
+	MOVB	@#LDB75, R0	; Direction/orientation
+	SUB	R1, R0
+	BEQ	LAC541
+	JMP	LAADA		; => Show the screen, continue the game main loop
+LAC541:
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	ADD	#10., R3	; offset in the room description
+	MOVB	(R3), R0
+	MOVB	R0, @#LDC89	; set as current item
+	CALL	LAE09		; Decode current room description to SCR_TILES (again?)
+	ADD	#9., R3		; offset in the room description
+	MOVB	(R3), R0
+	CMP	#001, R0
+	BEQ	LAC97
+; Found dead body, no items on it
+	CALL	LAB28		; Show small message popup
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	54020		; penRow/penCol
+	.WORD	SE0C3		; "Another Dead Person"
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	63022		; penRow/penCol
+	.WORD	SE0C5		; "Search Reveals Nothing"
+	JMP	LAD8C		; Show screen and wait for Escape key
+; Found dead body with some item on it
+LAC97:
+	CALL	LAD4F		; Get inventory item flag for item number in LDC89
+	CMP	R0, #001	; do we have it already?
+	BNE	LAC971
+	JMP	LAADA		; have it => Show the screen, continue the game main loop
+LAC971:	MOVB	@#LDB79, R0	; Get the room number
+	BEQ	LACC5		; yes => Small message popup "OMG! This Person Is DEAD! What Happened Here!?!"
+	CALL	LAB28		; Show small message popup
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	54020		; penRow/penCol
+	.WORD	SE0C7		; "This Person is Dead . . ."
+	CALL	LACB8		; Show arrow sign as prompt to continue
+	JMP	LAD00
+;
+; Show arrow sign in bottom-right corner, as a prompt to continue
+LACB8:
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	063260		; penRow/penCol
+	.WORD	SE0B9		; String with arrow down sign
+	RTS PC
+;
+; Small message popup "OMG! This Person Is DEAD! What Happened Here!?!"
+LACC5:
+	CALL	LAB28		; Show small message popup
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	54020		; penRow/penCol
+	.WORD	SE0BF
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	63022		; penRow/penCol
+	.WORD	SE0C1		; "What Happened Here!?!"
+	CALL	LACB8		; Show arrow sign as prompt to continue
+	JMP	LAD00
+;
+; Found action point at room description offset $0B..$0C
+LACE3:
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	ADD	#13., R3	; offset in the room description
+	MOVB	(R3), R1
+	MOVB	@#LDB75, R0	; Direction/orientation
+	SUB	R1, R0
+	BEQ	LACE31
+	JMP	LAADA		; => Show the screen, continue the game main loop
+LACE31:	JMP	LAD5B
+;
+; Show screen, wait for any key, show small message popup
+LACF6:
+	CALL	SHOWSC		; Copy shadow screen to actual screen
+	CALL	WAITAN		; Wait any key
+	JMP	LAB28		; Show small message popup
+;
+; Get item found on the dead body
+LAD00:
+	CALL	LACF6		; Show screen, wait for any key, show small message popup
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	54026		; penRow/penCol
+	.WORD	SE0C9		; "They Seem To Be Holding"
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	63076		; penRow/penCol
+	.WORD	SE0CB		; "Something"
+	INCB	@#LDBC7		; increase Items Found count
+LAD22:
+	CALL	LACB8		; Show arrow sign in bottom-right corner
+	CALL	LACF6		; Show screen, wait for any key, show small message popup
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	54060		; penRow/penCol
+	.WORD	SE0CF		; "You Picked Up A"
+	MOV	#63022, @#PEN_COL	; Set penRow/penCol
+	CALL	LAE19		; Get inventory item description string
+	CALL	LBEDE		; Show message char-by-char
+	MOVB	@#LDC89, R3	; get the current item number
+	ADD	#LDB9C, R3	; R3 = item address in my Inventory
+	MOVB	#001, (R3)	; Mark that we have the item now
+	JMP	LAD8C		; Show screen and wait for Escape key
+;
+; Get inventory item flag for item number in LDC89
+LAD4F:
+	MOVB	@#LDC89, R3	; get current item number
+	ADD	#LDB9C, R3	; R3 = item address in my Inventory
+	MOVB	(R3), R0	; R0 = item flag: $00 = not having, $01 = have it
+	RTS PC
+;
+LAD5B:
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	ADD	#14., R3	; + offset in the room description
+	MOVB	(R3), R0
+	MOVB	R0, @#LDC89	; set as current item
+	CMP	R0, #43		; weapon?
+	BEQ	LADA9		; yes => pick it up
+	CALL	LAD4F		; Get inventory item flag for item number in LDC89
+	CMP	R0, #001	; do we have it?
+	BNE	LAD5B1
+	JMP	LAADA		; yes => Show the screen, continue the game main loop
+LAD5B1:	CALL	LAB28		; Show small message popup
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	54026		; penRow/penCol
+	.WORD	SE0CD		; " Hey Whats This . . . ?"
+	INCB	@#LDBC7		; increase Items Found count
+	JMP	LAD22
+;
+; Show screen and wait for Escape key
+LAD8C:
+	CALL	SHOWSC		; Copy shadow screen to actual` screen
+LAD8F:
+	CALL	WTKEY	;STUB
+	JMP	L9E2E		; Show the screen, continue the game main loop
+;
+; Wait for Escape key
+LADA1:
+	CALL	LA0F1		; Scan keyboard
+	CALL	WTKEY	;STUB
+	RTS PC
+;
+; We found the weapon
+LADA9:
+	MOVB	@#LDCF7, R0
+	BEQ	LADA91
+	JMP	LAADA		; Show the screen, continue the game main loop
+; Picking up the weapon
+LADA91:
+	CALL	LAB28		; Show small message popup
+	MOVB	#001, @#LDCF7	; We've got the weapon
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	54034		; penRow/penCol
+	.WORD	SE0CD		; "Hey Whats This  .  .  . ?"
+	CALL	LACB8		; Show arrow sign in bottom-right corner
+	CALL	LACF6		; Show screen, wait for any key, show small message popup
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	54060		; penRow/penCol
+	.WORD	SE0CF		; "You Picked Up A"
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	63054		; penRow/penCol
+	.WORD	SE0B7		; "Ion Phaser"
+	BR	LAD8C		; Show screen and wait for Escape key
+;
+; Decode current room to SCR_TILES
+;   Returns: R3 = SCR_TILES
+LADE5:
+	MOVB	@#LDB79, R0	; Get the room number
+	MOV	#LDE97, R3	; List of encoded room addresses
+	CALL	LADFF		; now R3 = encoded room address
+; Entry point: Decode 96 bytes to SCR_TILES
+LADEE:
+	MOV	#96., R1	; decode 96 bytes
+; Decode the room/screen to SCR_TILES
+;   R3 = decode from; R1 = tile count to decode
+;   RTS PCs: R3 = SCR_TILES
+LADF5:
+	MOV	#SCR_TILES, R2
+	CALL	LB9F1		; Decode the room/screen
+	MOV	#SCR_TILES, R3
+	RTS PC
+;
+; Get address from table
+;   R0 = Element number
+;   R3 = Table address
+;TODO: Replace CALL LADFF to intermediate commands
+LADFF:
+	ADD	R0, R0
+	ADD	R0, R3
+	MOV	(R3), R3
+	RTS PC
+;
+; Decode current room description to SCR_TILES
+;   Returns: R3 = SCR_TILES
+LAE09:
+	MOVB	@#LDB79, R0	; Get room number
+	MOV	#LDF27, R3	; Table of adresses for room descriptions
+	CALL	LADFF		; Get address from table by index A
+	MOV	#49., R1	; decode 49 bytes
+	BR	LADF5		; Decode the room/screen to SCR_TILES
+;
+; Inventory item to item description string
+LAE19:
+	MOVB	@#LDC89, R3	; get current item number
+	ADD	R3, R3
+	MOV	LDFB7(R3), R3	; Get address from table LDFB7 by index
+	RTS PC
+;
+; Check access and show Door Lock
+;   LDC8B - Access code slot number
+LAE23:
+	MOVB	#50., @#LDC59	; set delay factor
+	MOVB	@#LDC8B, R3	; get Access code slot number
+	ADD	#LDCA2, R3	; Table with Access code slots
+	MOVB	(R3), R0	; get value from the slot
+	BEQ	LAE231
+	JMP	LB00E		; code was entered already? => Going to the next room
+; Need to enter the code for the slot
+LAE231:
+	MOV	#004, R1	; 4 symbols in the code
+	MOV	#LDC8D, R3	; Buffer for entering access code
+LAE3D:
+	CLRB	(R3)+
+	SOB	R1, LAE3D
+	MOV	#LF468, R3	; Encoded screen: Door Lock panel popup
+	CALL	LADEE		; Decode 96 bytes of the screen to SCR_TILES
+	CALL	DRAW_TILESET2		; Display screen R3 from tiles with Tileset2
+	MOVB	#10., @#LDCF3	; Left margin size for text
+	MOVB	#12., @#LDCF4	; Line interval for text
+	CALL	LB09B		; Preparing to draw string with the prompt
+	MOV	#SE0DD, R3	; "Door Locked"
+	CALL	LBEDE		; Show message char-by-char
+	MOV	#42012, @#PEN_COL	; set penRow/penCol
+	CALL	LAFFE		; Get "Access code level N required" string by access level in DC8C
+	CALL	LBEDE		; Show message char-by-char
+	MOVB	#37., @#LDC82	; set current item number - "Enter" sign
+	MOVB	#160., @#LDC83	; set X pos
+	MOVB	#96., @#LDC84	; set Y pos
+	MOVB	#6, @#LDC57	; set Door Lock pos
+; Check if the access code was entered before for this level
+	CALL	DRGEFA		; DoorLockGetEnteredFlagAddr
+	MOVB	(R3), R0	; get "access code was entered for this level" flag
+	BEQ	LAE80		; the code wasn't entered => enter the code as usual
+; Access code was entered for this level before, so pre-fill the code
+	CALL	LAFEC		; LDC8C access code level -> HL = address from LE015 table
+	MOV	#LDC8D, R2	; buffer for entering the code, 4 tile numbers
+	MOVB	(R3)+, (R2)+
+	MOVB	(R3)+, (R2)+
+	MOVB	(R3)+, (R2)+
+	MOVB	(R3)+, (R2)+
+	MOVB	#2, @#LDC57	; set Door Lock pos
+	CALL	DLOKSH		; show the pre-filled code
+; Door Lock loop starts here
+LAE80:
+	MOV	#(TILES3+480.), R4	; Selection box tile
+	MOV	#16., R1	; height
+	MOVB	@#LDC84, R3	; get Y pos
+	CLR	R2
+	BISB	@#LDC83, R2	; get X pos
+	CALL	L9E5F		; Draw tile by XOR operation
+	CALL	SHOWSC		; Copy shadow screen to UKNC screen
+; Delay and wait for key in Door Lock
+LAE99:	MOV	#12., R1
+LAE9B:	CALL	LB2D0		; Delay by LDC59
+	SOB	R1, LAE9B
+; Door Lock scan keyboard and process key pressed
+	CALL	LA0F1		; Scan keyboard
+	CMP	R0, #005	; Select key
+	BEQ	LAEBA
+	CMP	R0, #001	; Down key?
+	BEQ	LAE9B1
+	CMP	R0, #002	; Left key?
+	BEQ	LAE9B2
+	CMP	R0, #003	; Right key?
+	BEQ	LAE9B3
+	CMP	R0, #004	; Up key?
+	BEQ	LAE9B4
+	CMP	R0, #007	; Escape key?
+	BNE	LAE99		; no => continue the key waiting loop
+	JMP	L9E2E		; Exit Door Lock - Show the screen, continue the game main loop
+;
+LAE9B1:	JMP	DLOKDN		; Door Lock Down key
+LAE9B2:	JMP	LAF70		; Door Lock Left key
+LAE9B3:	JMP	LAF86		; Door Lock Right key
+LAE9B4:	JMP	DLOKUP		; Door Lock Up key
+;
+; Door Lock Select key pressed
+LAEBA:
+;TODO:	CALL	WaitKeyUp	; Wait until no key pressed to prevent double-reads of the same key
+	MOVB	@#LDC82, R0	; get current selection
+	CMP	R0, #37.	; "Enter" sign?
+	BEQ	LAF14		; yes => Code entered, need to check it
+	MOVB	@#LDC57, R0	; get Door Lock pos
+	DEC	R0
+	CMP	R0, #001
+	BEQ	LAE99		; Return to Delay and wait for key in Door Lock
+	MOVB	R0, @#LDC57	; set Door Lock pos
+; Move entered code digits higher
+	MOV	#(LDC8D+1), R3
+	MOV	#LDC8D, R2
+	MOVB	(R3)+, (R2)+
+	MOVB	(R3)+, (R2)+
+	MOVB	(R3)+, (R2)+
+	MOVB	@#LDC82, R0	; get current selection
+	MOVB	R0, @#(LDC8D+3)	; put in Buffer for entering access code +3
+; Show four tiles with the entered code
+	CALL	DLOKSH		; DoorLockDisplayCode
+	CALL	SHOWSC		; Copy shadow screen to UKNC screen
+	BR	LAE99		; Return to Delay and wait for key in Door Lock
+;
+; Show four tiles with the entered code
+; DoorLockDisplayCode:
+DLOKSH:
+	MOV	#LDC8D, R3	; Buffer for entering access code
+	MOV	#4, R1
+LAEEF:
+	MOVB	(R3)+, R4
+	PUSH	R3
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4		; * 64
+	ADD	#TILES2, R4
+	MOV	R1, R2
+	ADD	R2, R2
+	ADD	R2, R2
+	ADD	R2, R2		; * 8 = col
+	MOV	#16., R3	; row
+	PUSH	R1
+	CALL	DRTIL2		; Draw tile R4 at col R2 row R3
+	POP	R1
+	POP	R3
+	ADD	#2, R1
+	CMP	R1, #12.
+	BNE	LAEEF
+	RTS PC
+;
+; Access code entered, need to check
+LAF14:
+	MOVB	@#LDC57, R0	; get Door Lock pos
+	DEC	R0
+	CMP	R0, #001
+	BEQ	LAF2C		; => validate the code
+; Invalid Code
+LAF1D:
+	CALL	LB09B		; Preparing to draw string with the result
+	MOV	#SE0DF, R3	; "INVALID CODE"
+	CALL	DRSTR		; Show message
+	CALL	SHOWSC		; Copy shadow screen to UKNC screen
+	JMP	LAE99		; Return to Delay and wait for key in Door Lock
+; Validate the code entered
+LAF2C:
+	MOV	#4, R1
+	MOV	#LDC8D, R2	; Buffer for entering access code
+	CALL	LAFEC		; LDC8C access code level -> HL = address from LE015 table
+LAF34:
+	CMPB	(R2)+, (R3)+
+	BNE	LAF1D		; -> Invalid Code
+	SOB	R1, LAF34
+	CALL	LB09B		; Preparing to draw string with the result
+	MOV	#SE0E1, R3	; "Accepted!"
+	CALL	DRSTR		; Show message
+	CALL	SHOWSC		; Copy shadow screen to UKNC screen
+	MOVB	@#LDC8B, R3	; get Access code slot number
+	ADD	#LDCA2, R3	; Table with Access code slots
+	MOVB	#001, (R3)	; Mark code here was accepted
+; Remember that we already entered access code for this level
+	CALL	DRGEFA		; DoorLockGetEnteredFlagAddr
+	MOVB	#001, (R3)	; set the flag
+	CALL	LBA81		; Delay x40 - added to have a pause after the Accepted message
+	JMP	LB00E		; Going to the next room
+;
+; Door Lock up key pressed
+DLOKUP:
+	CMPB	@#LDC84, #48.	; Y pos = top row already?
+	BNE	DLOKU1
+	JMP	LAE99		; Return to Delay and wait for key in Door Lock
+; Move selection up
+DLOKU1:
+	CALL	LAFD2		; Draw selection box by XOR
+	MOVB	@#LDC84, R0	; get Y pos
+	SUB	#16., R0	; one tile up
+	MOVB	R0, @#LDC84	; set Y pos
+	MOVB	@#LDC82, R0	; get Inventory current
+	SUB	#3, R0
+	MOVB	R0, @#LDC82	; set Inventory current
+	JMP	LAE80		; continue the Door Lock loop
+; Door Lock down key pressed
+DLOKDN:
+	CMPB	@#LDC84, #96.	; Y pos = bottom row already?
+	BNE	DLOKD1
+	JMP	LAE99		; Return to Delay and wait for key in Door Lock
+; Move selection down
+DLOKD1:
+	CALL	LAFD2		; Draw selection box by XOR
+	MOVB	@#LDC84, R0	; get Y pos
+	ADD	#16., R0	; one tile down
+	MOVB	R0, @#LDC84	; set Y pos
+	MOVB	@#LDC82, R0	; get Inventory current
+	ADD	#3, R0
+	MOVB	R0, @#LDC82	; set Inventory current
+	JMP	LAE80		; continue the Door Lock loop
+; Move selection right
+LAF5A:
+	CALL	LAFD2		; Draw selection box by XOR
+	INCB	@#LDC82		; Inventory current right
+	RTS PC
+; Move selection left
+LAF65:
+	CALL	LAFD2		; Draw selection box by XOR
+	DECB	@#LDC82		; Inventory current left
+	RTS PC
+; Door Lock - key Left
+LAF70:
+	MOVB	@#LDC83, R0	; get X pos
+	CMPB	R0, #128.
+	BNE	LAF701		; => move selection
+	JMP	LAE99		; Return to Delay and wait for key in Door Lock
+LAF701:	CALL	LAF65		; Move selection Left
+	MOVB	@#LDC83, R0	; get X pos
+	SUB	#16., R0
+	MOVB	R0, @#LDC83	; set X pos
+	JMP	LAE80		; continue the Door Lock loop
+; Door Lock - key Right
+LAF86:
+	MOVB	@#LDC83, R0	; get X pos
+	CMPB	R0, #160.
+	BNE	LAF861		; => move selection
+	JMP	LAE99		; Return to Delay and wait for key in Door Lock
+LAF861:	CALL	LAF5A		; Move selection Right
+	MOVB	@#LDC83, R0	; get X pos
+	ADD	#16., R0
+	MOVB	R0, @#LDC83	; set X pos
+	JMP	LAE80		; continue the Door Lock loop
+;
+; Draw selection box by XOR
+LAFD2:
+	MOV	#(TILES3+480.), R4
+	MOV	#16., R1
+	MOVB	@#LDC84, R3	; get Y pos
+	CLR	R2
+	BISB	@#LDC83, R2	; get X pos
+	CALL	L9E5F		; Draw tile by XOR operation
+	JMP	SHOWSC
+;
+; LDC8C access code level -> address from LE015 table
+LAFEC:
+	MOVB	@#LDC8C, R3	; Get Access code level 0..4
+	ADD	R3, R3
+	ADD	#LE015, R3	; Table of addresses
+	MOV	(R3), R3
+	RTS PC
+;
+; LDC8C access code level -> message address from LE01F table
+LAFFE:
+	MOVB	@#LDC8C, R3	; Get Access code level 0..4
+	ADD	R3, R3
+	ADD	#LE01F, R3	; Table of addresses
+	MOV	(R3), R3
+	RTS PC
+;
+; LDC8C access code level -> "access code was entered for this level before" flag address
+; Returns: HL = address
+; DoorLockGetEnteredFlagAddr:
+DRGEFA:
+	MOVB	@#LDC8C, R3	; Get Access code level 0..4
+	ADD	#DLLENT, R3
+	RTS PC
+;
+; Going to the next room
+LB00E:
+	CLRB	@#LDB82		; mark we don't have an alien in the room
+	MOVB	#40., @#LDC59	; set delay factor
+	MOVB	@#LDC8A, R0	; get Direction to other room
+	DEC	R0		; 001 down?
+	BEQ	LB03E
+	DEC	R0		; 002 up?
+	BEQ	LB04F
+	DEC	R0		; 003 left?
+	BEQ	LB061
+	DEC	R0		; 004 right?
+	BEQ	LB06E
+LB02E:
+	MOV	#8., R1		; x8
+LB030:	CALL	LB2D0		; Delay
+	SOB	R1, LB030
+	MOVB	@#LDC86, @#LDB79	; copy room number
+	JMP	L9E2E		; Show the screen, continue the game main loop
+; Going to the next room - down
+LB03E:
+	MOVB	#48., @#LDB77	; set Y pixel coord
+	CLRB	@#LDB75		; Direction/orientation = down
+	MOVB	#3., @#LDB78	; set Y tile coord = 3
+	BR	LB02E
+; Going to the next room - up
+LB04F:
+	MOVB	#96., @#LDB77	; set Y pixel coord
+	MOVB	#001, @#LDB75	; Direction/orientation = up
+	MOVB	#6., @#LDB78	; set Y tile coord = 6
+	BR	LB02E
+; Going to the next room - left
+LB061:
+	MOVB	#10., @#LDB76	; set X tile coord = 10
+	MOVB	#002, @#LDB75	; Direction/orientation = left
+	BR	LB02E
+; Going to the next room - right
+LB06E:
+	MOVB	#1., @#LDB76	; set X tile coord = 1
+	MOVB	#003, @#LDB75	; Direction/orientation = right
+	BR	LB02E
+;
+; Decrease Health by 4, restore Y coord
+LB07B:
+	MOV	#2, R1
+LB07D:
+	CALL	LB994		; Decrease Health
+	SOB	R1, LB07D
+	POP	R0
+	MOVB	R0, @#LDB78	; set Y tile coord
+	POP	R0
+	MOVB	R0, @#LDB77	; set Y pixel coord
+	JMP	LA8CD
+;
+; Decrease Health by 4, restore X coord
+LB08D:
+	MOV	#2, R1
+LB08F:
+	CALL	LB994		; Decrease Health
+	SOB	R1, LB08F
+	POP	R0
+	MOVB	R0, @#LDB76
+	JMP	LA8CD
+;
+; Door Lock: Preparing to draw string with prompt/result
+LB09B:
+	MOV	#32001, R3	; line 52 col 1
+	MOV	#6014, R2	; 12 rows, 12 cols
+	CALL	CLBLK		; ClearScreenBlock
+	MOV	#32014, @#PEN_COL	; set penRow/penCol
+	RTS PC
+;
+; Open the Inventory pop-up
+;
+LB0A2:
+	MOV	#LF329, R3	; Encoded screen for Inventory/Info popup
+	CALL	LADEE		; Decode 96 bytes of the screen to SCR_TILES
+	CALL	DRAW_TILESET2		; Display screen HL from tiles with Tileset 2
+	MOVB	#22., @#LDCF3	; Left margin size for text
+	MOVB	#12., @#LDCF4	; Line interval for text
+	CLRB	@#LDCF5		; Data cartridge reader slot??
+	CLRB	@#LDC59		; set delay factor
+	CLRB	@#LDC5A		; clear Inventory items count
+	CLRB	@#LDCF8
+	MOVB	#16., @#LDC83	; set X pos
+	MOVB	#36., @#LDC84	; set Y pos
+	MOV	#13060, @#PEN_COL	; Set penRow/penCol
+	MOV	#SE0BB, R3	; "- INVENTORY -"
+	CALL	DRSTR		; DrawString
+; Draw intentory items
+	MOV	#LDB9C, R3	; Inventory table address
+	MOV	#29., R1	; 29 items
+LB0E0:				; loop by B
+	PUSH	R3
+	MOVB	(R3), R0	; get item
+	BEQ	LB0E01		; no item => skip
+	CALL	LB12A		; we have the item => put in the list and draw
+LB0E01:	POP	R3
+	INC	R3
+	SOB	R1, LB0E0
+; Draw empty slots
+	MOV	#30., R1	; 30 placeholders
+	MOVB	@#LDC5A, R0	; get Inventory items count
+	SUB	R0, R1		; R1 = count of empty slots
+LB0F3:
+	PUSH	R1
+	MOV	#(TILES3+448.), R4	; Tile gray dot in the center - placeholder
+	CALL	LB15D		; Draw tile by XOR then go to next position
+	POP	R1
+	BEQ	LB119		; last item => exit the loop
+	DEC	R1
+	MOVB	@#LDC5A, R2	; get Inventory items count
+	MOVB	#143, LDC5B(R2)	; empty slot marker -> inventory slot
+	INCB	@#LDC5A		; increase Inventory items count
+	BR	LB0F3
+LB119:
+	BR	LB1AA		; go to Inventory screen loop
+;
+;NOTE LB11C routine moved into LB15D
+;
+LB12A:
+	PUSH	R1
+	MOV	#29., R0	; 29 items
+	SUB	R1, R0
+	PUSH	R0
+	CALL	LB529		; Convert Inventory item number to icon number
+	MOV	R0, R4
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4		; * 32
+	ADD	#(TILES3+64.), R4
+	CALL	LB15D		; Draw tile by XOR then go to next position
+	MOV	#LDC5B, R3	; Inventory items
+	MOVB	@#LDC5A, R0	; get Inventory items count
+	ADD	R0, R3
+	POP	R0
+	MOVB	R0, (R3)
+	BNE	LB12A1
+	CALL	LB301		; => mark we've got Data cartridge reader
+LB12A1:	INCB	@#LDC5A		; increase Inventory items count
+	POP	R1
+	RTS PC
+;
+; Inventory - Draw tile by XOR using X = (LDC83), Y = (LDC84),
+; then go to next position
+LB15D:
+	MOVB	@#LDC84, R3	; get Y pos for Inventory
+	CLR	R2
+	BISB	@#LDC83, R2	; get X pos for Inventory
+	MOV	#16., R1	; tile height
+	CALL	L9E5F		; Draw tile by XOR; R3 = Y; R2 = X
+	MOVB	@#LDC83, R0	; get X pos
+	ADD	#16., R0	; X to the next position
+	MOVB	R0, @#LDC83	; set X pos
+	CMPB	R0, #176.	; end of the row?
+	BNE	LB15DR
+; Move (X,Y) to the next row (was: LB11C routine)
+	MOVB	#16., @#LDC83	; set X pos
+	MOVB	@#LDC84, R0
+	ADD	#20., R0	; 20 lines lower
+	MOVB	R0, @#LDC84	; set Y pos
+LB15DR:	RTS PC
+;
+; Display screen from tiles with Tileset2
+;   R3 = Screen in tiles, usually SCR_TILES
+DRAW_TILESET2:
+	CLR	R1		; col
+	CLR	R2		; row
+DRAW_TILESET20:
+	PUSH	R1
+	PUSH	R2
+	MOVB	(R3)+, R4
+	PUSH	R3		; store tile address
+	CMPB	#001, R4
+	BEQ	DRAW_TILESET21
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4		; now R4 = tile * 64
+	ADD	#TILES2, R4	; R4 = tile address
+	MOV	R2, R3		; row
+	MOV	R1, R2		; col
+	CALL	DRTIL2		; Draw tile from Tileset2; R3 = row, R2 = col, R4 = tile addr
+DRAW_TILESET21:	POP	R3		; restore tile address
+	POP	R2		; restore row
+	POP	R1		; restore col
+	ADD	#16., R1	; next col
+	CMP	R1, #(16.*12.)	; end of line?
+	BNE	DRAW_TILESET20		; no => continue the loop
+	CLR	R1
+	ADD	#16., R2	; next row
+	CMPB	#128., R2	; last row?
+	BNE	DRAW_TILESET20		; no => continue the loop
+	RTS PC
+;
+; Clear the bottom area in the Inventory popup
+; ClearInventoryMesage:
+CLINVM:
+	PUSH	R3
+	MOV	#56001, R3	; at row 92 col 1
+	MOV	#15026, R2	; 24 rows, 22 cols
+	CALL	CLBLK		; ClearScreenBlock
+	POP	R3
+	RTS PC
+;
+; Inventory screen loop
+LB1AA:
+	CLRB	@#LDC82		; clear Inventory current
+	MOVB	#16., @#LDC83	; set X pos
+	MOVB	#36., @#LDC84	; set Y pos
+	CALL	LB2AF		; Prepare item description string
+LB1BB:				; Inventory loop starts here
+	CALL	CLINVM		; ClearInventoryMesage
+	CALL	DRSTR		; draw Inventory item description; was: CALL LBEDE;
+	CALL	LB295		; draw Inventory selection square
+	MOVB	#68., @#LDC59	; set delay factor
+	CALL	LB2D0		; delay, to make Inventory selection more usable
+; Inventory item selection loop
+LB1C1:
+	CALL	LA0F1		; Scan keyboard
+	CMP	R0, #007	; Escape key? (close any popups)
+	BNE	LB1C1A
+	JMP	MAIN_LOOP		; yes => return to the game main loop
+LB1C1A:	CMP	R0, #005	; Look/shoot key?
+	BEQ	LB1C15
+	CMP	R0, #001	; Down key?
+	BEQ	LB1C11
+	CMP	R0, #002	; Left key?
+	BEQ	LB1C12
+	CMP	R0, #003	; Right key?
+	BEQ	LB1C13
+	CMP	R0, #004	; Up key?
+	BEQ	LB1C14
+	BR	LB1C1		; continue the loop
+;
+LB1C11:	BR	INVKDN		; Inventory Down key
+LB1C12:	BR	LB1FE		; Inventory Left key
+LB1C13:	BR	LB214		; Inventory Right key
+LB1C14:	BR	INVKUP		; Inventory Up key
+LB1C15:	JMP	LB307		; Inventory Select key
+;
+LB1DB:
+	CALL	LB2DE		; Print string LDCF9
+	JMP	LB2AF		; Prepare item description string
+LB1E2:
+	CALL	LB295		; Draw Inventory selection square
+	DECB	@#LDC82		; dec Inventory current - left
+	BR	LB1DB		; Print string LDCF9 and Prepare item description string
+LB1F0:
+	CALL	LB295		; Draw Inventory selection square
+	INCB	@#LDC82		; inc Inventory current - right
+	BR	LB1DB		; Print string LDCF9 and Prepare item description string
+; Inventory Down key pressed
+INVKDN:
+	CALL	LB295		; Draw Inventory selection square
+	MOVB	@#LDC84, R0	; get Y pos
+	CMP	R0, #76.	; last row?
+	BEQ	INVKD1
+	ADD	#20., R0
+	MOVB	R0, @#LDC84	; set Y pos
+	MOVB	@#LDC82, R0	; get Inventory current
+	ADD	#10., R0
+	MOVB	R0, @#LDC82	; set Inventory current
+INVKD1:
+	CALL	LB1DB		; Print string LDCF9 and Prepare item description string
+	BR	LB1BB		; continue Inventory loop
+; Inventory Up key pressed
+INVKUP:
+	CALL	LB295		; Draw Inventory selection square
+	MOVB	@#LDC84, R0	; get Y pos
+	CMP	R0, #36.	; last row?
+	BEQ	INVKU1
+	SUB	#20., R0
+	MOVB	R0, @#LDC84	; set Y pos
+	MOVB	@#LDC82, R0	; get Inventory current
+	SUB	#10., R0
+	MOVB	R0, @#LDC82	; set Inventory current
+INVKU1:
+	CALL	LB1DB		; Print string LDCF9 and Prepare item description string
+	BR	LB1BB		; continue Inventory loop
+; Inventory Left key pressed
+LB1FE:                   	; Left key pressed
+	MOVB	@#LDC83, R0	; get X pos
+	CMP	R0, #16.
+	BEQ	LB25F
+	CALL	LB1E2		; Draw square and move left
+	MOVB	@#LDC83, R0	; get X pos
+	SUB	#16., R0
+	MOVB	R0, @#LDC83	; set X pos
+	BR	LB1BB		; continue Inventory loop
+; Inventory Right key pressed
+LB214:                    	; Right key pressed
+	MOVB	@#LDC83, R0	; get X pos
+	CMPB	R0, #160.
+	BEQ	LB22A
+	CALL	LB1F0		; Draw square and move right
+	MOVB	@#LDC83, R0	; get X pos
+	ADD	#16., R0
+	MOVB	R0, @#LDC83	; set X pos
+	BR	LB1BB		; continue Inventory loop
+LB22A:
+	MOVB	@#LDC84, R0	; get Y pos
+	CMP	R0, #76.	; last row?
+	BEQ	LB245
+	CALL	LB1F0		; Draw square and move left
+	MOVB	@#LDC84, R0	; get Y pos
+	ADD	#20., R0
+	MOVB	R0, @#LDC84	; set Y pos
+	MOVB	#16., @#LDC83	; set X pos
+	JMP	LB1BB		; continue Inventory loop
+; Inventory - Put selection on the 1st item
+LB245:
+	CALL	LB295		; Draw Inventory selection square
+	MOVB	#16., @#LDC83	; set X pos
+	MOVB	#36., @#LDC84	; set Y pos
+	CLRB	@#LDC82		; clear Inventory current
+	CALL	LB2DE		; Print string LDCF9
+	CALL	LB2AF		; Prepare item description string
+	JMP	LB1BB		; continue Inventory loop
+LB25F:
+	MOVB	@#LDC84, R0	; get Y pos
+	CMP	R0, #36.
+	BEQ	LB27A
+	CALL	LB1E2		; Draw square and move left
+	MOVB	@#LDC84, R0	; get Y pos
+	SUB	#20., R0
+	MOVB	R0, @#LDC84	; set Y pos
+	MOVB	#160., @#LDC83	; set X pos
+	JMP	LB1BB		; continue Inventory loop
+LB27A:
+	CALL	LB295		; Draw Inventory selection square
+	MOVB	#160., @#LDC83	; set X pos
+	MOVB	#76., @#LDC84	; set Y pos
+	MOVB	#29., @#LDC82	; set Inventory current
+	CALL	LB2DE		; Print string LDCF9
+	CALL	LB2AF		; Prepare item description string
+	JMP	LB1BB		; continue Inventory loop
+; Draw Inventory selection square
+LB295:
+	MOV	#(TILES3+480.), R4
+	MOV	#16., R1
+	MOVB	@#LDC84, R3	; get Y pos
+	CLR	R2
+	BISB	@#LDC83, R2	; get X pos
+	CALL	L9E5F		; Draw tile by XOR operation
+	JMP	SHOWSC
+;
+; Prepare item description string
+;   Returns: R3 = item description string
+LB2AF:
+	MOV	#64022, @#PEN_COL	; Set penRow/penCol
+	MOVB	@#LDC82, R0	; get Inventory current
+	MOVB	LDC5B(R0), R0	; get item from the Inventory list
+	CMP	#143, R0	; empty slot?
+	BEQ	LB2CC
+	MOVB	R0, @#LDC89	; set as current item
+	JMP	LAE19		; Inventory item to item description string
+LB2CC:
+	MOV	#SE0DB, R3	; "---- N o  I t e m ----"
+	RTS PC
+;
+; Delay by LDC59
+LB2D0:
+; FIXME -- temporarily disabled delays!
+	RTS PC
+
+	CLR	R2
+	BISB	@#LDC59, R2	; get delay factor
+	ASR	R2
+	INC	R2
+LB2D00:
+	CLR	R0
+	BISB	@#LDC59, R0
+LB2D01:
+	SOB	R0, LB2D01
+	SOB	R2, LB2D00
+	RTS PC
+;
+; Print string LDCF9
+LB2DE:
+	MOVB	@#LDCF2, R0
+	CMP	R0, #001
+	BNE	LB2EC
+	MOV	#56012, R3
+	CALL	LB2F7
+LB2EC:
+	MOV	#64012, R3
+	CALL	LB2F7
+	CLRB	@#LDCF2
+	RTS PC
+LB2F7:
+	MOVB	R3, @#PEN_COL	; Set penRow/penCol
+	MOV	#LDCF9, R3
+	JMP	DRSTR
+;
+; We've got Data cartridge reader
+LB301:
+	MOVB	#001, @#LDCF5	; Data cartridge reader slot
+	RTS PC
+;
+; Inventory Look/shoot key pressed
+LB307:
+;TODO:	CALL	WaitKeyUp
+	CALL	CLINVM		; ClearInventoryMesage
+	MOV	#LDC5B, R3	; Inventory list
+	MOVB	@#LDC82, R0	; get Inventory current
+	ADD	R0, R3
+	MOVB	(R3), R0	; get item
+	CMP	R0, #143	; empty slot?
+	BNE	LB3071
+	JMP	LB1C1
+LB3071:
+	MOVB	R0, @#LDC89	; set as current item
+	BEQ	LB33F		; $00 - Data cartridge reader
+	CMP	R0, #19.	; Power Drill?
+	BEQ	LB3072
+	CMP	R0, #20.	; Life Support Data Disk?
+	BEQ	LB3073
+	CMP	R0, #21.	; Air-Lock Tool?
+	BEQ	LB3074
+	CMP	R0, #22.	; Box of Power Cells?
+	BEQ	LB3075
+	CMP	R0, #25.	; Rubik's Cube?
+	BEQ	LB3076
+	SUB	#17., R0	; Data cartridge?
+	BLO	LB3077
+	JMP	LB3E8		; smth other
+;
+LB3072: JMP	LB3F4		; Power Drill selected
+LB3073:	JMP	LB44A		; Life Support Data Disk selected
+LB3074:	JMP	LB487		; Air-Lock Tool selected
+LB3075:	JMP	LB4C4		; Box of Power Cells selected
+LB3076:	JMP	LB501		; Rubik's Cube selected
+LB3077:	JMP	LB3AF		; Data cartridge selected
+;
+; Data cartridge reader (or data cartridge) selected in the Inventory
+LB33F:
+	MOVB	#68., @#LDC59	; set delay factor
+	MOVB	#001, @#LDC85	; Use delay and copy screen in LBEDE
+	MOV	#LF42F, R3	; Encoded screen for Data cartridge reader
+	CALL	LADEE		; Decode 96 bytes of the screen to SCR_TILES
+	CALL	DRAW_TILESET2		; Display screen HL from tiles with Tileset 2
+	MOVB	@#LDCF8, R0
+	CMP	R0, #001	; was cartridge selected?
+	BEQ	LB36C		; no => jump
+	MOVB	#33., @#LDCF3	; Left margin size for text
+	MOV	#26026, @#PEN_COL	; Set penRow/penCol
+	MOV	#SE09B, R3	; "No Data Cartridge Selected"
+	BR	LB373
+LB36C:
+	MOV	#12026, @#PEN_COL	; Set penRow/penCol
+	POP	R3		; restore the message address
+LB373:
+	CALL	LBEDE		; Show message char-by-char
+	MOVB	@#LDC89, R0	; get current item number
+	CMP	R0, #002
+	BNE	LB3731
+	CALL	LB39A		; Draw level 2 access code
+LB3731:	CMP	R0, #003
+	BNE	LB3732
+	CALL	LB3A1		; Draw level 3 access code
+LB3732:	CMP	R0, #004
+	BNE	LB3733
+	CALL	LB3A8		; Draw level 4 access code
+LB3733:	CALL	SHOWSC		; Copy shadow screen to actual screen
+LB38B:
+	CALL	LA0F1		; Scan keyboard
+	CMP	R0, #007	; Escape key?
+	BNE	LB38B
+	CLRB	@#LDC85		; Skip delay and copy screen in LBEDE
+	JMP	MAIN_LOOP		; Return to the main game loop
+LB39A:
+	MOV	#LDC96, R3	; Get code address - level 2 access code buffer
+	JMP	LBC3C
+LB3A1:
+	MOV	#LDC9A, R3	; Get code address - level 3 access code buffer
+	JMP	LBC3C
+LB3A8:
+	MOV	#LDC9E, R3	; Get code address - level 4 access code buffer
+	JMP	LBC3C
+;
+; Data cartridge selected in the Inventory
+LB3AF:
+	TSTB	@#LDCF5		; Data cartridge reader
+	BEQ	LB3C8		; do we have the reader? no => jump
+	MOVB	@#LDC89, R0	; get current item number
+	MOV	#LDFF3, R3	; Table address for data cartridge messages
+	CALL	LADFF		; Get address from table by index A
+	PUSH	R3		; store the message address
+	MOVB	#001, @#LDCF8	; mark that cartridge was selected
+	JMP	LB33F		; => go like the Data cartridge reader selected
+LB3C8:				; We don't have data cartridge reader
+	CALL	LB2DE		; Print string LDCF9
+	MOV	#56030, @#PEN_COL	; Set penRow/penCol
+	MOV	#SE0E3, R3	; "You Need A Data Cartridge Reader"
+	CALL	LB513		; Show message
+	JMP	LB1C1
+;
+LB3DA:
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	ADD	#17., R3	; offset in the room description
+	MOVB	(R3), R1
+	MOVB	@#LDB75, R0	; Direction/orientation
+	SUB	R1, R0
+	RTS PC
+;
+; Something other selected in the Inventory
+LB3E8:
+	CALL	LB51F
+	MOV	#SE129, R3	; "You dont seem to be able to use this item here"
+	CALL	LB513		; Show message
+	JMP	LB1C1
+;
+; Power drill selected in the Inventory
+LB3F4:
+	CALL	LB3DA
+	BNE	LB3E8
+	CALL	LB538		; Get value at $13 offset in the room description
+	CMP	R0, #001	; is it Generator in the room?
+	BNE	LB3E8
+	MOV	#(LDB90+1), R3
+	MOVB	(R3), R0
+	BNE	LB42E		; Generator working? yes => jump
+	CALL	LB541		; Get value at $0F offset in the room description
+	SUB	R1, R0		; compare current offset in the room with the value
+	BEQ	LB41C		; equal => jump
+	INC	R3
+	MOVB	(R3), R1
+	MOVB	@#LDC56, R0	; get offset in the room
+	SUB	R1, R0
+	BNE	LB3E8
+; Using Power Drill in the proper spot
+LB41C:
+	CALL	LB51F
+	MOV	#SE137, R3	; "You use the Power Drill to Repair the Generator"
+	CALL	LB513		; Show message
+	MOVB	#001, @#(LDB90+1)	; mark the Generator is working now
+	JMP	LB1C1
+;
+LB42E:
+	MOVB	#10., @#LDCF3	; Left margin size for text
+	MOVB	#12., @#LDCF4	; Line interval for text
+	CALL	LB2DE		; Print string LDCF9
+	MOV	#57012, @#PEN_COL	; Set penRow/penCol
+	MOV	#SE12D, R3	; "It doesnt look like you can do anything else here"
+	CALL	LB513		; Show message
+	JMP	LB1C1
+;
+; Life Support Data Disk selected in the Inventory
+LB44A:
+	CALL	LB3DA
+	BNE	LB3E8
+	CALL	LB538		; Get value at $13 offset in the room description
+	CMP	R0, #004
+	BNE	LB3E8
+	MOV	#004, R2
+	CALL	LB531		; Get value (LDB90+DE)
+	BNE	LB42E
+	CALL	LB541		; Get value at $0F offset in the room description
+	SUB	R1, R0		; compare current offset in the room with the value
+	BEQ	LB472		; equal => jump
+	INC	R3
+	MOVB	(R3), R1
+	MOVB	@#LDC56, R0	; get offset in the room
+	SUB	R1, R0
+	BNE	LB3E8
+; Using Life Support Data Disk in the proper spot
+LB472:
+	CALL	LB51F
+	MOV	#SE139, R3	; "Life-Support System has been fully restored"
+	CALL	LB513		; Show message
+	MOVB	#001, @#(LDB90+4)	; mark that Life-Support System is working
+	JMP	LB1C1
+;
+; Air-Lock Tool selected in the Inventory
+LB487:
+	CALL	LB3DA
+	BNE	LB3E8
+	CALL	LB538		; Get value at $13 offset in the room description
+	CMP	R0, #005
+	BNE	LB3E8
+	MOV	#005, R2
+	CALL	LB531		; Get value (LDB90+DE)
+	BNE	LB42E
+	CALL	LB541		; Get value at $0F offset in the room description
+	SUB	R1, R0		; compare current offset in the room with the value
+	BEQ	LB4AF		; equal => jump
+	INC	R3
+	MOVB	(R3), R1
+	MOVB	@#LDC56, R0	; get offset in the room
+	SUB	R1, R0
+	BEQ	LB3E8
+; Using Air-Lock Tool in the proper spot
+LB4AF:
+	CALL	LB51F
+	MOV	#SE13B, R3	; "The Evacuation Deck has been re-pressurised"
+	CALL	LB513		; Show message
+	MOVB	#001, @#(LDB90+5)	; mark that the Evacuation Deck re-pressurised
+	JMP	LB1C1
+;
+; Box of Power Cells selected in the Inventory
+LB4C4:
+	CALL	LB3DA
+	BEQ	LB4C41
+	JMP	LB3E8
+LB4C41:	CALL	LB538		; Get value at $13 offset in the room description
+	CMP	R0, #006
+	BEQ	LB4C42
+	JMP	LB3E8
+LB4C42:	MOV	#006, R2
+	CALL	LB531		; Get value (LDB90+DE)
+	BNE	LB42E
+	CALL	LB541		; Get value at $0F offset in the room description
+	SUB	R1, R0		; compare current offset in the room with the value
+	BEQ	LB4EC		; equal => jump
+	INC	R3
+	MOVB	(R3), R1
+	MOVB	@#LDC56, R0	; get offset in the room
+	SUB	R1, R0
+	BEQ	LB4EC
+	JMP	LB3E8
+; Using Box of Power Cells in the proper spot
+LB4EC:
+	CALL	LB51F
+	MOV	#SE13D, R3	; "You Insert a Power Cell. Guidance System Online"
+	CALL	LB513		; Show message
+	MOVB	#001, @#(LDB90+6)	; mark we have Guidance System working
+	JMP	LB1C1
+;
+; Rubik's Cube selected in the Inventory
+LB501:
+	CALL	LB2DE		; Print string LDCF9
+	MOV	#57024, @#PEN_COL	;
+	MOV	#SE12B, R3	; "You dont have any time to play with this now"
+	CALL	LB513		; Show message
+	JMP	LB1C1
+;
+; Show message HL and show the screen
+LB513:
+	CALL	LBEDE		; Show message char-by-char
+	CALL	SHOWSC		; Copy shadow screen to UKNC screen
+	MOVB	#001, @#LDCF2
+	RTS PC
+;
+LB51F:
+	CALL	LB2DE		; Print string LDCF9
+	MOV	#57022, @#PEN_COL
+	RTS PC
+;
+; Convert Inventory item number to icon number
+LB529:
+	TSTB	R0
+	BEQ	LB529R		; 0 = Data cartridge reader
+	SUB	#17., R0
+	BHIS	LB529R
+	MOV	#001, R0	; Data cartridge
+LB529R:	RTS PC
+;
+; Get value (LDB90+R2)
+LB531:
+	MOVB	LDB90(R2), R0
+	RTS PC
+;
+; Get value at $13 offset in the room description
+LB538:
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	ADD	#023, R3	; add offset in the room description
+	MOVB	(R3), R0
+	RTS PC
+;
+; Get value at $0F offset in the room description
+;   Returns: R1 = value from the offset; R0 = LDC56 = offset in the room
+LB541:
+	CALL	LAA9D		; Get room offset in tiles for X = LDB76, Y = LDB78
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	ADD	#15., R3	; add offset in the room description
+	MOVB	(R3), R1
+	MOVB	@#LDC56, R0	; get offset in the room
+	RTS PC
+;
+; Process alien in the room
+LB551:
+	CALL	LB72E		; Get value at offset $2F in the room description
+	TST	R0		; do we have the alien?
+	BNE	LB5511
+	RTS PC			; we don't have it => return
+; We have an alien in the room description
+LB5511:
+	TSTB	@#LDB82		; do we have it already in the room?
+	BNE	LB57B		; yes => jump
+	DEC	R3		; now HL = RoomDesc + $2E
+	MOVB	(R3), @#LDB81	; set Alien type
+	DEC	R3		; now HL = RoomDesc + $2D
+	MOVB	(R3), @#LDB80	; set Alien Y tile coord
+	DEC	R3		; now HL = RoomDesc + $2C
+	MOVB	(R3), R0
+	ADD	R0, R0
+	MOVB	R0, @#LDB7F	; set Alien Y coord
+	DEC	R3		; now HL = RoomDesc + $2B
+	MOVB	(R3), @#LDB7E	; set Alien X coord
+	MOVB	#003, @#LDB85	; set alien health = 3
+	MOVB	#001, @#LDB84	; set Alien alive flag
+LB57B:
+	MOVB	@#LDB84, R0	; Alien still alive?
+	BEQ	LB622		; dead => jump
+	CALL	RAND8		; Generate random number 0..7
+	TST	R0
+	BEQ	LB57BD		; Alien down
+	CMP	R0, #002
+	BEQ	LB57BU		; Alien up
+	CMP	R0, #004
+	BEQ	LB57BL		; Alien left
+	CMP	R0, #006
+	BEQ	LB57BR		; Alien right
+	BR	LB622
+;
+LB57BD:	JMP	LB59D		; Alien down
+LB57BU:	JMP	LB5C3		; Alien up
+LB57BL:	JMP	LB5E9		; Alien left
+LB57BR:	JMP	LB607		; Alien right
+;
+; Alien goes down
+LB59D:
+	CLRB	@#LDB86		; set Alien direction/orientation = down
+	CALL	LB713
+	TST	R0		; same position?
+	BNE	LB59D1
+	JMP	LB737		; => Player injured by Alien moving to him
+LB59D1:	CALL	LB6B0
+	CMP	R0, #001
+	BNE	LB622
+	MOVB	@#LDB7F, R0	; get Alien Y coord
+	ADD	#16., R0	; down one tile
+	MOVB	R0, @#LDB7F	; set Alien Y coord
+	INCB	@#LDB80		; inc Alien Y tile coord
+	BR	LB622
+;
+; Alien goes up
+LB5C3:
+	MOVB	#001, @#LDB86	; set Alien direction/orientation = up
+	CALL	LB713
+	TST	R0		; same position?
+	BNE	LB5C31
+	JMP	LB737		; => Player injured by Alien moving to him
+LB5C31:	CALL	LB6B0
+	CMP	R0, #001
+	BNE	LB622
+	MOVB	@#LDB7F, R0	; get Alien Y coord
+	SUB	#16., R0	; up one tile
+	MOVB	R0, @#LDB7F	; set Alien Y coord
+	DECB	@#LDB80		; dec Alien Y tile coord
+	BR	LB622
+;
+; Alien goes left
+LB5E9:
+	MOVB	#002, @#LDB86	; set Alien direction/orientation = left
+	CALL	LB713
+	TST	R0		; same position?
+	BNE	LB5E91
+	JMP	LB737		; => Player injured by reflected bullet
+LB5E91:	CALL	LB6B0
+	CMP	R0, #001
+	BNE	LB622
+	DECB	@#LDB7E		; dec Alien X coord
+	BR	LB622
+;
+; Alien goes right
+LB607:
+	MOVB	#003, @#LDB86	; set Alien direction/orientation = right
+	CALL	LB713
+	TST	R0		; same position?
+	BNE	LB6071
+	JMP	LB737		; => Player injured by Alien moving to him
+LB6071:	CALL	LB6B0
+	CMP	R0, #001
+	BNE	LB622
+	INCB	@#LDB7E		; inc Alien X coord
+;
+LB622:
+	MOVB	@#LDB7E, R2	; get Alien X coord
+	ADD	R2, R2		; tile X cord -> 8px column number 0..23
+	MOVB	@#LDB7F, R3	; get Alien Y coord = row
+	CLR	R0		; clear draw flags
+	CALL	LB67B		; Get alien sprite address in R4
+	CALL	L9EDE		; Draw sprite R4; R2 = column; R3 = row
+	MOVB	#001, @#LDB82	; mark that we already have an Alien in the room
+	MOVB	@#LDB83, R0	; get Alien sprite phase
+	INC	R0		; next phase
+	BIC	#177776, R0	; limit to 0..1
+	MOVB	R0, @#LDB83	; set Alien sprite phase
+	MOVB	@#LDB81, R0	; get Alien type
+	CMP	R0, #002	; the big one?
+	BNE	LB64B
+	JMP	LB82B		; yes => jump to Check if the Bullet hit the Alien
+LB64B:
+	CALL	LB8CA		; Is the Bullet hit the Alien?
+	TST	R0
+	BNE	LB64BR
+	CALL	LB71F		; Bullet hit the alien => Killed the Alien
+LB64BR:	RTS PC
+;
+LB653:
+	TSTB	@#LDB84		; Alien still alive?
+	BEQ	LB64BR		; dead => return
+	CALL	LB72E		; Get value at offset $2F in the room description
+	TST	R0		; do we have the alien?
+	BEQ	LB64BR		; we don't have it => return
+; We have an alien in the room description
+	CMPB	@#LDB81, #002	; Alien type = 2?
+	BNE	LB64BR		; no => return
+; Draw alien type 2
+	MOVB	@#LDB7E, R2	; get Alien X coord
+	ADD	R2, R2		; tile X cord -> 8px column number 0..23
+	MOVB	@#LDB7F, R3	; get Alien Y coord = row
+	SUB	#16., R3	; one tile up
+	CLR	R0		; clear draw flags
+	CALL	LB69D		; Get alien head sprite address in R4
+	JMP	L9EDE		; Draw sprite DE at column H row L
+;
+;NOTE: Procedure LB676 removed, not used anymore
+;
+; Get alien sprite address
+; Returns R4 = tile address, R0 = draw flags
+LB67B:
+	TSTB	@#LDB84		; Alien still alive?
+	BNE	LB685
+	MOV	#(SPRITE+1536.), R4	; $18*64 - Alien dead sprite
+LB67BR:	RTS PC
+LB685:				; Alien still alive
+	CMPB	@#LDB81, #002	; Alien type = big one?
+	BEQ	LB698
+	MOV	#(SPRITE+1472.), R4	; $17 - Small Alien sprite
+	MOVB	@#LDB83, R0	; get Alien sprite phase
+	BEQ	LB67BR		; phase 0 => return
+	MOV	#(SPRITE+2112.), R4	; $21 - Small Alien sprite, reflected vertically
+	CLR	R0
+	RTS PC
+LB698:				; Alien type 2
+	MOV	#(SPRITE+1664.), R4	; $1A - big Alien body sprite
+	BR	LB6A0
+; Get alien head sprite address in R4
+LB69D:
+	MOV	#(SPRITE+1600.), R4	; $19 - Alien head sprite
+LB6A0:
+	MOVB	@#LDB83, R0	; get Alien sprite phase
+	BEQ	LB6A0R
+	ADD	#128., R4	; switch to other sprite
+	CLR	R0		; draw flags
+LB6A0R:	RTS PC
+;
+LB6B0:
+	CALL	LADE5		; Decode current room to SCR_TILES
+	MOVB	@#LDB7E, R2	; get Alien X coord
+	CALL	LB6CD		; ?? left/right
+	ADD	R2, R3
+	MOV	#12., R2
+	MOVB	@#LDB80, R1	; get Alien Y tile coord
+	CALL	LB6DD		; ?? up/down
+	JMP	LAA78
+;
+LB6CD:
+	MOVB	@#LDB86, R0	; get Alien direction/orientation
+	BEQ	LB6CDR
+	CMP	R0, #001
+	BEQ	LB6CDR
+	CMP	R0, #002	; left?
+	BNE	LB6DB
+	DEC	R2		; one left
+LB6CDR:	RTS PC
+LB6DB:	INC	R2		; one right
+	RTS PC
+;
+LB6DD:
+	MOVB	@#LDB86, R0	; get Alien direction/orientation
+	CMP	R0, #002
+	BEQ	LB6DDR
+	CMP	R0, #003
+	BEQ	LB6DDR
+	TST	R0		; down?
+	BNE	LB6EB
+	INC	R1		; one down
+LB6DDR:	RTS PC
+LB6EB:	DEC	R1		; one up
+	RTS PC
+;
+; Get R0 = Alien position within the room
+LB6ED:
+	MOVB	@#LDB80, R1	; Get R1=Alien Y tile coord
+	MOVB	MUL12D(R1), R1	; * 12.
+	MOVB	@#LDB7E, R0	; get Alien X coord
+	ADD	R1, R0
+	MOVB	R0, @#LDB87	; R0 = Alien Y tile coord * 12 + Alien X coord
+	RTS PC
+;
+;NOTE: Procedure LB6FA removed, not used anymore
+;
+LB703:
+	MOVB	@#LDB80, R1	; Get R1=Alien Y tile coord
+	CALL	LB6DD		; ?? up/down
+	MOVB	@#LDB7E, R2	; get Alien X coord
+	CALL	LB6CD		; ?? left/right
+	MOV	R2, R0
+	MOVB	MUL12D(R1), R1	; * 12.
+	ADD	R1, R0
+	MOVB	R0, @#LDB87
+	RTS PC
+;
+LB713:
+	CALL	LAA9D		; Get room offset in tiles for X = LDB76, Y = LDB78
+	CALL	LB703
+	MOV	R0, R1
+	MOVB	@#LDC56, R0
+	SUB	R1, R0
+	RTS PC
+; Killed the alien
+LB71F:
+	CLRB	@#LDB84		; set Alien not alive
+	CALL	LB8DC		; Clear all Bullet variables
+	INC	@#LDBC5		; inc Enemies Killed count
+	RTS PC
+;
+; Get value at offset $2F in the room description
+;   Returns: A = value
+LB72E:
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	ADD	#47., R3	; offset in the room description
+	MOVB	(R3), R0
+	RTS PC
+;
+; Player injured by Alien moving to him
+LB737:
+	CLRB	@#LDB8D		; clear shooting process mark
+	CALL	LB994		; Decrease Health
+	CMPB	@#LDB81, #002	; Alien type = big one?
+	BNE	LB7371
+	CALL	LB994		; Decrease Health
+LB7371:	JMP	LB622
+;
+LB74C:
+	CALL	LAA9D		; Get room offset in tiles for X = LDB76, Y = LDB78
+	CALL	LB6ED		; Get A = Alien position within the room
+	MOV	R0, R1
+	MOVB	@#LDC56, R0	; get offset in the room
+	SUB	R1, R0
+	RTS PC
+;
+; Fire key pressed in Shoot mode
+LB758:
+	MOVB	@#LDB8C, R0	; get shooting flag
+	CMP	R0, #001	;
+	BEQ	LB768		; still in prev shooting? => jump
+	MOV	#001, R0
+	MOVB	R0, @#LDB8D	; set shooting process flag
+	MOVB	R0, @#LDD55	; set shooting flag for player's animation
+LB768:
+	JMP	L9E2E		; Show the screen, continue the game main loop
+;
+; Process shoot within the game main loop
+;
+LB76B:
+	TSTB	@#LDB8D		; shooting process flag
+	BEQ	LB84A		; not in the process => jump
+	CMPB	@#LDB8C, #001	; we have bullet flying?
+	BEQ	LB797		; yes => jump
+	MOVB	#001, @#LDB8D	; set shooting process flag
+	MOVB	@#LDB75, @#LDB8B	; player Direction/orientation -> bullet
+	MOVB	@#LDB76, @#LDB88	; player X coord in tiles -> bullet
+	MOVB	@#LDB77, @#LDB89	; player Y coord/line on the screen -> bullet
+	MOVB	@#LDB78, @#LDB8A	; player Y coord in tiles -> bullet
+LB797:
+	MOVB	@#LDB8B, R0	; get Bullet Direction/orientation
+	BEQ	LB7AD		; 000 - down
+	DEC	R0
+	BEQ	LB7C7		; 001 - up
+	DEC	R0
+	BEQ	LB7E1		; 002 - left
+	DEC	R0
+	BEQ	LB7F3		; 003 - right
+; Bullet down
+LB7AD:
+	CALL	LB87C		; Move the Bullet
+	CMP	R0, #001	; Empty cell?
+	BEQ	LB7AD1
+	JMP	LB8D6
+LB7AD1:	MOVB	@#LDB89, R0	; get Bullet Y coord/line on the screen
+	ADD	#16., R0	; down 16 rows
+	MOVB	R0, @#LDB89	; set Bullet Y coord/line on the screen
+	INCB	@#LDB8A		; inc Bullet Y coord in tiles
+	BR	LB805
+; Bullet up
+LB7C7:
+	CALL	LB87C		; Move the Bullet
+	CMP	R0, #001	; Empty cell?
+	BEQ	LB7C71
+	JMP	LB8D6
+LB7C71:	MOVB	@#LDB89, R0	; get Bullet Y coord/line on the screen
+	SUB	#16., R0
+	MOVB	R0, @#LDB89	; set Bullet Y coord/line on the screen
+	DECB	@#LDB8A		; dec Bullet Y coord in tiles
+	BR	LB805
+; Bullet left
+LB7E1:
+	CALL	LB87C		; Move the Bullet
+	CMP	R0, #001	; Empty cell?
+	BNE	LB8D6
+	DECB	@#LDB88		; dec bullet X coord in tiles
+	BR	LB805
+; Bullet right
+LB7F3:
+	CALL	LB87C		; Move the Bullet
+	CMP	R0, #001	; Empty cell?
+	BNE	LB8D6
+	INCB	@#LDB88		; inc bullet X coord in tiles
+; Bullet moving
+LB805:
+	MOVB	@#LDB8D, R0	; get shooting process flag
+	BEQ	LB84A		; not in the process? => jump
+	MOVB	@#LDB88, R2	; get bullet X coord in tiles
+	ADD	R2, R2		; tile coord -> column number 0..23
+	MOVB	@#LDB89, R3	; get Bullet Y coord/line on the screen
+	CALL	LB84F		; Get Bullet sprite address in R4
+	CLR	R0		; draw flags
+	CALL	L9EDE		; Draw sprite R4; R2 = column; R3 = row
+	MOVB	#001, @#LDB8C	; we have bullet flying
+	MOVB	@#LDB81, R0	; get Alien type
+	CMP	R0, #002	; the big one?
+	BEQ	LB82B		; yes => jump to Check if the Bullet hit the Alien
+	JMP	LB64B		; Check Is the Bullet hit the Alien, process the hit
+;
+LB82B:
+	CALL	LB8CA		; Is the Bullet hit the Alien?
+	TST	R0
+	BNE	LB82BR		;  no => return
+; Bullet hit the Alien, the big one
+	CLRB	@#LDB8D		; clear shooting process flag
+	CLRB	@#LDB88		; clear Bullet X coord in tiles
+	CLRB	@#LDB89		; clear Bullet Y coord/line on the screen
+	DECB	@#LDB85		; dec Alien health
+	BNE	LB82BR		; zero Health?
+	CALL	LB71F		; yes => Killed the alien
+LB82BR:	RTS PC
+;
+LB84A:
+	CLRB	@#LDB8C		; clear "bullet flying" flag
+	RTS PC
+;
+; Get Bullet tile address and draw flags
+;   Returns: R4 = tile address; A = draw flags (always $00)
+LB84F:
+	MOVB	@#LDB8B, R0	; get Bullet Direction/orientation
+	ADD	R0, R0		; *2
+	MOV	LB84FT(R0), R4	; get sprite address from the table
+	RTS PC
+LB84FT:	.WORD	(SPRITE+1856.)	; 000 - down - $1D - Bullet vert sprite
+	.WORD	(SPRITE+1920.)	; 001 - up   - $1E - Bullet vert sprite
+	.WORD	(SPRITE+1984.)	; 002 - left - $1F - Bullet horz sprite
+	.WORD	(SPRITE+2048.)	; 003 - right- $20 - Bullet horz sprite
+;
+; Move the Bullet
+; Returns: R0 = room cell value for the new bullet position
+LB87C:
+	CALL	LADE5		; Decode current room to SCR_TILES
+	MOVB	@#LDB88, R2	; get Bullet X coord in tiles
+	CALL	LB89B		; For Bullet direction left: dec R2, right: inc R2
+	ADD	R2, R3
+	MOVB	@#LDB8A, R1	; get Bullet Y coord in tiles
+	CALL	LB8AB		; For Bullet direction up: dec R1, down: inc R1
+	MOVB	MUL12D(R1), R0	; multiply by 12.
+	ADD	R0, R3
+	MOVB	(R3), R0	; get value for the room cell
+	RTS PC
+;
+; For Bullet direction left: dec R2, right: inc R2
+LB89B:
+	MOVB	@#LDB8B, R0	; get Bullet Direction/orientation
+	CMP	R0, #002	; left?
+	BEQ	LB89B1
+	CMP	R0, #003	; right?
+	BEQ	LB8A9
+	RTS PC
+LB89B1:	DEC	R2
+	RTS PC
+LB8A9:	INC	R2
+	RTS PC
+;
+; For Bullet direction up: dec R1, down: inc R1
+LB8AB:
+	MOVB	@#LDB8B, R0	; get Bullet Direction/orientation
+	BNE	LB8AB1
+	INC	R1		; one down
+	RTS PC
+LB8AB1:	CMP	R0, #001	; left?
+	BNE	LB8ABR
+	DEC	R1		; one up
+LB8ABR:	RTS PC
+;
+; Get R0 = Bullet position within the room
+LB8BB:
+	MOVB	@#LDB8A, R0	; get Bullet Y coord in tiles
+	MOVB	MUL12D(R0), R0	; * 12.
+	MOVB	@#LDB88, R1	; get Bullet X coord in tiles
+	ADD	R1, R0
+	RTS PC
+;
+; Is the Bullet hit the Alien?
+LB8CA:
+	CALL	LB6ED		; Get A = Alien position within the room
+	CALL	LB8BB		; Get R0 = Bullet position within the room
+	MOV	R0, R1
+	MOVB	@#LDB87, R0
+	SUB	R1, R0
+	RTS PC
+;
+; Bullet hit something
+LB8D6:
+	CALL	LB8DC		; Clear all Bullet variables
+	JMP	LB805
+;
+; Clear all Bullet variables
+LB8DC:
+	CLRB	@#LDB8D		; clear shooting process mark
+	CLRB	@#LDB88		; clear Bullet X coord in tiles
+	CLRB	@#LDB89		; clear Bullet Y coord/line on the screen
+	CLRB	@#LDB8A		; clear Bullet Y coord in tiles
+	RTS PC
+;
+; Show look/shoot selection indicator
+;
+LB8EA:
+	TSTB	@#LDB7D		; Get look/shoot switch value
+	BEQ	LB902		; look mode? => jump
+	CALL	LB913
+	MOV	#140., R2
+	CALL	L9E5F		; Draw tile by XOR operation
+	CALL	LB91C
+	MOV	#160., R2
+	JMP	L9E5F		; Draw tile by XOR operation
+LB902:
+	CALL	LB913
+	MOV	#118., R2
+	CALL	L9E5F		; Draw tile by XOR operation
+	CALL	LB91C
+	MOV	#138., R2
+	JMP	L9E5F		; Draw tile by XOR operation
+LB913:
+	MOV	#(TILES3+20.), R4	; Small triange pointing right
+	MOV	#006, R1	; Tile height
+	MOV	#4., R3		; Y pos
+	RTS PC
+LB91C:
+	MOV	#(TILES3+32.+20.), R4	; Small triange pointing right
+	MOV	#006, R1	; Tile height
+	MOV	#4., R3		; Y pos
+	RTS PC
+;
+LB925:
+	MOVB	#14., @#LDCF3	; Left margin size for text
+	MOVB	#14., @#LDCF4	; Line interval for text
+	RTS PC
+;
+; Switch Look / Shoot mode
+LB930:
+	TSTB	@#LDCF7		; Weapon slot
+	BNE	LB94C
+; Don't have a weapon
+	CALL	LB925
+	CALL	LAB28		; Show small message popup
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	54054		; penRow/penCol
+	.WORD	SE0D3		; "You dont have a Weapon to equip!"
+	JMP	LAD8C		; Show screen and wait for Escape key
+LB94C:
+	TSTB	@#LDB7D		; look/shoot switch value
+	BNE	LB95C		; shoot mode => jump
+	MOVB	#001, @#LDB7D	; set look/shoot switch = Shoot
+	BR	LB960
+LB95C:
+	CLRB	@#LDB7D		; set look/shoot switch value = Look
+LB960:
+	MOVB	#150., @#LDC59	; set delay factor
+	CALL	LB2D0		; Delay
+	JMP	L9E2E		; Show the screen, continue the game main loop
+;
+; Display Health
+LB96B:
+; Cheat: Show room number at the bottom-left
+;.IF NE CHROMN
+;	MOV	#73020, @#PEN_COL	; Set penRow/penCol
+;	MOVB	@#LDB79, R3	; Get the room number
+;	CALL	DRNUM3
+;.ENDC
+	MOV	#454, @#PEN_COL	; Set penRow/penCol
+	MOV	@#VAR_HP, R3	; get Health value
+	JMP	DRNUM3		; Show 3-digit decimal number R3
+	RTS PC
+;
+; Draw 5-digit number R3 at row/col R2, and show the screen
+LB97D:
+	MOV	R2, @#PEN_COL	; set penRow/penCol
+	CALL	DRNUM5
+	JMP	SHOWSC		; Copy shadow screen to UKNC screen
+;
+; Decrease Health
+LB994:
+	MOVB	@#VAR_HP, R0	; get Health
+	SUB	#2, R0		; Health = Health minus 2
+	BHIS	LB9941
+	CLR	R0
+LB9941:	MOVB	R0, @#VAR_HP	; set Health
+; Set border to red as an indication of the injury
+;TODO: Indicate we had injures
+	RTS PC
+;
+; Player is dead, Health 0
+;
+LB9A2:
+	CALL	CLSHAD		; Clear Shadow Screen
+	MOVB	#32., @#LDCF3	; Left margin size for text
+	MOVB	#14., @#LDCF4	; Line interval for text
+	CALL	LAB28		; Show small message popup
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	54016		; Set penRow/penCol
+	.WORD	SE0BD		; "The Desolate has claimed your life too . . ."
+	CALL	LB9D6		; Clear player variables
+	INC	@#LDBC3		; increase Player deaths count
+LB9C9:
+	CALL	SHOWSC		; Copy shadow screen to UKNC screen
+LB9C91:	CALL	LA0F1		; Scan keyboard
+	CMP	R0, #007	; Escape key? TODO: any key
+	BNE	LB9C91
+	JMP	L9E19		; Go to ending of main game loop
+;
+; Clear player variables
+LB9D6:
+	CLRB	@#LDB79		; set the room number
+	CLRB	@#LDB75		; Direction/orientation
+	MOVB	#6, @#LDB76	; set X tile coord = 6
+	MOVB	#48., @#LDB77	; set Y pixel coord = 48
+	MOVB	#3, @#LDB78	; set Y tile coord = 3
+	MOV	#100.,@#VAR_HP	; set Health = 100
+	RTS PC
+;
+; Decode the block from RLE sequence
+;   R3 = address decode from (usually encoded room/screen)
+;   R2 = address decode to
+;   R1 = number of bytes to decode
+LB9F1:	MOVB	(R3)+, R0
+	CMPB	R0, #377	; repeater?
+	BEQ	LB9F13
+	MOVB	R0, (R2)+
+	SOB	R1, LB9F1
+LB9F11:	RTS PC
+LB9F13:	MOVB	(R3)+, R0
+	BIC	#177400, R0
+	INC	R3
+LB9F14:	DEC	R3
+	MOVB	(R3)+, (R2)+
+	DEC	R1
+	BEQ	LB9F11
+	SOB	R0, LB9F14
+	BR	LB9F1
+;
+; Show titles and show Menu
+START_TITLES:
+	MOVB	#68., @#LDC59	; set delay factor
+	MOVB	#1, @#LDC85	; Use delay and copy screen in LBEDE
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	35036		; penRow/penCol
+	.WORD	SE09D		; "MaxCoderz Presents"
+	CALL	LBA81		; Delay x40
+	CALL	BLANK_SCR		; Clear shadow screen and copy to actual screen
+	CALL	LBC34		; Delay x20
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	35056	 	; penRow/penCol
+	.WORD	SE09F		; "a tr1p1ea game"
+	CALL	LBA81		; Delay x40
+	CALL	BLANK_SCR		; Clear shadow screen and copy to UKNC screen
+	CALL	LBC34		; Delay x20
+	CLRB	@#LDC85		; Skip delay and copy screen in LBEDE
+	CALL	STHEML		; ScreenThemeLite - switching to the light theme on Main Menu
+	BR	LBA3D		; Return to Menu
+;
+; MenuFromGame:
+MENUFG:
+	MOV	#(072+12.), @#LDB8F	; "Continue" menu item -> set Menu Y pos
+;
+; Return to Menu
+;
+LBA3D:
+	MOVB	@#LDC55, R0	; get Menu background phase
+	INC	R0
+	BIC	#177770, R0
+	MOVB	R0, @#LDC55	; set Menu background phase
+	MOV	#LF515, R3	; Main menu screen moving background, 96 tiles
+	CALL	LA88F		; Display 96 tiles on the screen
+	MOV	#LF4B5, R3	; Main menu screen
+	CALL	DRAW_TILESET2		; Display screen HL from tiles with Tileset 2
+	MOV	#11., R2	; left triangle X pos
+	MOV	#(TILES3), R4	; Tile arrow right
+	CALL	LBA88		; Draw menu item selection triangle
+	MOV	#77., R2	; right triangle X pos
+	MOV	#(TILES3+32.), R4	; Tile arrow left
+	CALL	LBA88		; Draw menu item selection triangle
+	CALL	SHOWSC		; Copy shadow screen to UKNC screen
+	CALL	LA0F1		; Scan keyboard
+	CMP	R0, #005	; look/shoot key
+	BEQ	LBA93		;   select menu item
+	CMP	R0, #004	; Up key
+	BEQ	LBA3D4
+	CMP	R0, #001	; Down key
+	BEQ	LBA3D1
+	INC	@#RANDSD	; Change random seed
+	BR	LBA3D		; Return to main Menu
+;
+LBA3D1: JMP	LBBDC		; Menu down
+LBA3D4: JMP	LBBCC		; Menu up
+;
+; Draw menu item selection triangle
+;   R2 = X pos; R4 = tile address
+LBA88:
+	MOVB	@#LDB8F, R3	; get Menu Y pos
+	MOV	#10., R1	; tile height
+	JMP	L9E5F		; Draw tile by XOR; R2 = X, R3 = Y
+;
+; Select on Menu item
+LBA93:
+	MOVB	@#LDB8F, R0	; get Menu Y pos
+	CMP	R0, #58.
+	BEQ	LBA931		; New menu item
+	CMP	R0, #70.
+	BEQ	LBA932		; Continue menu item
+	CMP	R0, #82.
+	BEQ	LBA933		; Info menu item
+	CMP	R0, #94.
+	BEQ	LBA934		; Credits menu item
+	CMP	R0, #106.
+	BEQ	LBA935		; Quit menu item
+	BR	LBA3D		; Return to main Menu
+;
+LBA931:	JMP	LBAB2		; New menu item
+LBA932:	JMP	LBB82		; Continue menu item
+LBA933: JMP	LBBEC		; Info menu item
+LBA934:	JMP	LBF64		; Credits menu item
+LBA935:	JMP	L9E51		; Quit menu item
+;
+; New menu item selected
+LBAB2:
+	TSTB	@#LDB73		; do we have current game?
+	BEQ	LBADE		; no => New Game
+	CALL	LB925
+	CALL	LAB28		; Show small message popup
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	54016		; penRow/penCol
+	.WORD	SE0A3		; "OverWrite Current Game?"
+	CALL	SHOWSC		; Copy shadow screen to UKNC screen
+LBACE:
+	CALL	LA0F1		; Scan keyboard
+	CMP	R0, #15.	; Menu button?
+	BEQ	LBA3D		; yes => return to Menu
+	CMP	R0, #9.		; Enter?
+	BEQ	LBADE		; yes => New Game
+	BR	LBACE		; wait some more
+;
+; New Game
+;
+LBADE:
+	CLRB	@#LDCF7		; clear Weapon slot
+	CLRB	@#LDB7D		; set look/shoot switch value = Look
+	CLRB	@#LDBC7		; clear Items Found count
+	CALL	LB9D6		; Clear player variables
+	CLR	@#LDBC3		; clear Player deaths count
+	CLR	@#LDBC5		; clear Aliens Killed count
+	MOV	#LDB9C, R3	; Inventory table address
+	MOV	#34., R1	; 34 bytes
+LBAF9:	CLRB	(R3)+
+	SOB	R1, LBAF9
+	MOV	#LDC5B, R3
+	MOV	#34., R1
+LBB03:	CLRB	(R3)+
+	SOB	R1, LBB03
+	MOV	#LDB90, R3
+	MOV	#9., R1		; 9 variables to clear
+LBB09:	CLRB	(R3)+
+	SOB	R1, LBB09
+	MOV	#LDCA2, R3	; Table with Access code slots
+	MOV	#72., R1	; 72 bytes
+LBB17:	CLRB	(R3)+
+	SOB	R1, LBB17
+	MOV	#(DLLENT+1), R3	;   ld hl,DoorLockLevelEntered+1
+	MOV	#4, R1
+LBADE5:	CLRB	(R3)+		; Clear 4 flags
+	SOB	R1, LBADE5
+	MOV	#LDC96, R3	; level 2 access code buffer
+	CALL	LBC6B		; Generate random code
+	MOV	#LDC9A, R3	; level 3 access code buffer
+	CALL	LBC6B		; Generate random code
+	MOV	#LDC9E, R3	; level 4 access code buffer
+	CALL	LBC6B		; Generate random code
+	CALL	STHEMN		; ScreenThemeNite - switching to dark theme for story mode
+	CALL	BLANK_SCR		; Clear shadow screen and copy to UKNC screen
+	MOVB	#68., @#LDC59	; set delay factor
+	MOVB	#1, @#LDC85	; Use delay and copy screen in LBEDE
+	MOVB	#14., @#LDCF4	; set Line interval for text
+	CLRB	@#LDCF3		; clear Left margin size for text
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	35024		; penRow/penCol
+	.WORD	SE115		; "In the Distant Future . . ."
+	CALL	LBA81		; Delay x40
+	CALL	BLANK_SCR		; Clear shadow screen and copy to UKNC screen
+	CALL	LBA81		; Delay x40
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	000000		; zero penRow/penCol
+	.WORD	SE117		; "'The Desolate' Space Cruiser leaves orbit. ...
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	71266		; penRow/penCol
+	.WORD	SE0B9		; String with arrow down sign
+	CALL	WTKEY		; Wait for any key
+	CALL	CLSHAD		; ClearShadowScreen
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	000000		; Set zero penRow/penCol
+	.WORD	SE119		; "The ship sustains heavy damage. ...
+	CALL	WTKEY		; Wait for any key
+;
+; Game start
+;
+LBB7E:
+	CLRB	@#LDC85		; Skip delay and copy screen in LBEDE
+; Continue menu item selected
+LBB82:
+	CALL	STHEML		; ScreenThemeLite - switching to light theme opening the game screen
+	CALL	BLANK_SCR		; Clear shadow screen and copy to UKNC screen
+	MOVB	#001, @#LDB73
+	MOVB	#377, @#LDC59	; set delay factor
+	CALL	LB2D0		; Delay
+	JMP	MAIN_LOOP		; Return to the main game loop
+;
+LBB92:
+	TSTB	@#LDB73		; do we have the game to continue?
+	BNE	LBBA4
+	MOVB	@#LDB8F, R0	; get Menu Y pos
+	SUB	#24., R0	; up two steps
+	MOVB	R0, @#LDB8F	; set Menu Y pos
+	JMP	LBA3D		; Return to main Menu
+; Menu up step
+LBBA4:
+	MOVB	@#LDB8F, R0	; get Menu Y pos
+	SUB	#12., R0	; up one step
+	MOVB	R0, LDB8F	; set Menu Y pos
+	JMP	LBA3D		; Return to main Menu
+LBBAF:
+	TSTB	@#LDB73		; do we have the game to continue?
+	BNE	LBBC1
+	MOVB	@#LDB8F, R0	; get Menu Y pos
+	ADD	#24., R0	; down two steps
+	MOVB	R0, LDB8F	; set Menu Y pos
+	JMP	LBA3D		; Return to main Menu
+; Menu down step
+LBBC1:
+	MOVB	@#LDB8F, R0	; get Menu Y pos
+	ADD	#12., R0	; down one step
+	MOVB	R0, LDB8F	; set Menu Y pos
+LBBC1R:	JMP	LBA3D		; Return to main Menu
+; Menu up key pressed
+LBBCC:
+	MOVB	@#LDB8F, R0	; get Menu Y pos
+	CMP	R0, #58.	; "New Game" selected?
+	BEQ	LBBC1R		;   JP Z,LBA3D
+	CMP	R0, #82.	; "Info" selected?
+	BEQ	LBB92
+	BR	LBBA4
+; Menu down key pressed
+LBBDC:
+	MOVB	@#LDB8F, R0	; get Menu Y pos
+	CMP	R0, #106.	; "Quit" selected?
+	BEQ	LBBC1R		;   JP Z,LBA3D
+	CMP	R0, #58.	; "New Game" selected?
+	BEQ	LBBAF
+	BR	LBBC1
+;
+; Info menu item, show Controls
+;
+LBBEC:
+	CALL	STHEMN		; ScreenThemeNite
+	CALL	BLANK_SCR		; Clear and show shadow screen
+	MOVB	#10., @#LDCF3	; Left margin size for text
+	MOVB	#14., @#LDCF4	; Line interval for text
+	CALL	DRSTR3		; Show message char-by-char
+	.WORD	002074		; Set penRow/penCol
+	.WORD	SE0A5		; "- Controls -"
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	012012		; penRow/penCol
+	.WORD	SE0A7		; "2nd = Look / Shoot Alpha = Inventory ..."
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	073046		; penRow/penCol
+	.WORD	SVERS		; Version info
+	CALL	SHOWSC		; Copy shadow screen to UKNC screen
+	CALL	LADA1		; Wait for Escape key
+	CALL	STHEML		; ScreenThemeLite - switching to light theme for Main Menu
+	CALL	BLANK_SCR		; Clear and show shadow screen
+	JMP	LBA3D		; Return to Menu
+;
+; Delay x40
+LBA81:
+	CALL	LBC34		; Delay x20
+; Delay x20
+LBC34:
+	MOV	#20., R1	; x20
+LBC36:
+	CALL	LB2D0		; Delay
+	SOB	R1, LBC36
+	RTS PC
+;
+; Draw access code, 4 chars
+;   R3 = access code buffer address
+LBC3C:
+	MOV	#50070, @#PEN_COL	; penRow/penCol
+	MOV	#4, R1
+LBC45:
+	PUSH	R1
+	MOVB	(R3)+, R0
+	PUSH	R3
+	CMP	R0, #36.	; tile number for '-' sign
+	BEQ	LBC64
+	ADD	#22., R0	; from tile number to '0'..'9' char
+LBC53:	CALL	DRCHAR
+	POP	R3
+	POP	R1
+	SOB	R1, LBC45
+	RTS PC
+LBC64:
+	MOV	#45., R0	; '-'
+	BR	LBC53
+;
+; Generate random access code
+;   R3 = 4-byte buffer address
+LBC6B:
+	MOV	#4, R1
+LBC6D:
+	PUSH	R1
+	PUSH	R3
+	CALL	RAND11		; Generate random number 0..10
+	ADD	#26., R0
+	POP	R3
+	MOVB	R0, (R3)+
+	POP	R1
+	SOB	R1, LBC6D
+	RTS PC
+;
+; Clear shadow screen and copy to actual screen
+BLANK_SCR:
+	CALL	CLSHAD		; Clear shadow screen
+	JMP	SHOWSC		; Copy shadow screen to actual screen
+;
+; Set zero penRow/penCol
+; ClearPenRowCol:
+LBC84:
+	CLR	@#PEN_COL		; Set penRow/penCol = Left-top corner
+	RTS PC
+;
+; Found action point at room description offset $0F..$10
+LBC8B:
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	ADD	#17., R3	; offset in the room description
+	MOVB	(R3), R1
+	MOVB	@#LDB75, R0	; Direction/orientation
+	SUB	R1, R0
+	BEQ	LBC8B1
+	JMP	LAADA
+LBC8B1:
+	CALL	LAB28		; Show small message popup
+	MOVB	#10., @#LDCF3	; Left margin size for text
+	MOVB	#14., @#LDCF4	; Line interval for text
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	ADD	#19., R3	; offset in the room description
+	MOVB	(R3), R0
+	MOVB	R0, @#LDC87	; store RoomDesc[$13] value
+	MOVB	LDB90(R0), R0
+	BEQ	LBCD5		; not working yet? => jump
+	MOV	#SE12D, R3	; " It doesnt look like you can do anything else here"
+; Show the message R3, show screen, wait for key, continue game main loop
+LBCC5:
+	MOV	#54012, @#PEN_COL	; Set penRow/penCol = $580A
+	CALL	LBEDE		; Show message char-by-char
+	CALL	SHOWSC		; Copy shadow screen to actual screen
+LBCCB:
+	CALL	LA0F1		; Scan keyboard
+	CMP	R0, #007	; Escape key?
+	BNE	LBCCB		; no => wait some more
+	JMP	L9E2E		; Show the screen, continue the game main loop
+;
+LBCD5:
+	MOVB	@#LDC87, R0	; get RoomDesc[$13] value - important object in the room
+	CMP	R0, #001	; the Generator
+	BEQ	LBCF6
+	CMP	R0, #002	; the Workstation
+	BEQ	LBCFF
+	CMP	R0, #004	; Life-Support System
+	BEQ	LBD4E
+	CMP	R0, #005	; Evacuation Deck re-pressure
+	BEQ	LBD57
+	CMP	R0, #006	; Guidance System
+	BEQ	LBD60
+	CMP	R0, #007	; the Pod
+	BEQ	LBD70
+; RoomDesc[$13] == $01 - the Generator
+LBCF6:
+	MOV	#SE12F, R3	; "This Generator is damaged All of the panels are loose"
+	BR	LBCC5		; Show the message/screen, wait for key, continue game main loop
+; RoomDesc[$13] == $02 - the Workstation
+LBCFF:
+	TSTB	@#(LDB90+1)	; Generator working?
+	BNE	LBD11
+	MOV	#SE131, R3	; "This Workstation doesnt seem to have any power...?"
+	BR	LBCC5		; Show the message/screen, wait for key, continue game main loop
+LBD11:
+	CALL	LAE09		; Decode current room description to SCR_TILES
+	ADD	#48., R3	; offset in the room description
+	MOVB	(R3), R0
+	MOVB	R0, @#LDC89	; set the current item
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	54012		; penRow/penCol
+	.WORD	SE133		; "The Workstation has now successfully booted up"
+	CALL	SHOWSC		; Copy shadow screen to UKNC screen
+	CALL	LAB28		; Show small message popup
+LBD2B:
+	CALL	WTKEY		; WaitAnyKey
+	MOVB	#001, @#(LDB90+2)	; mark Workstation is used
+	MOVB	@#LDC89, R0	; get the current item number
+	MOVB	#001, LDB9C(R0)	; mark that we have the item now
+	MOV	#SE135, R3	; "The Workstation Ejected A Data Cartridge 2"
+	BR	LBCC5		; Show the message/screen, wait for key, continue game main loop
+; RoomDesc[$13] == $04 - Life-Support System
+LBD4E:
+	MOV	#SE13F, R3	; "The Life Support System needs Re-Configuring"
+	BR	LBCC5		; Show the message/screen, wait for key, continue game main loop
+; RoomDesc[$13] == $05 - Evacuation Deck re-pressurised
+LBD57:
+	MOV	#SE141, R3	; "AirLock Control & Re-Pressurisation Station"
+	BR	LBCC5		; Show the message/screen, wait for key, continue game main loop
+; RoomDesc[$13] == $06 - Guidance System
+LBD60:
+	MOV	#SE143, R3	; "This MainFrame is missing a Power Cell"
+	BR	LBCC5		; Show the message/screen, wait for key, continue game main loop
+;NOTE: Procedure LBD69 removed, not used anymore
+; RoomDesc[$13] == $07 - Pod
+LBD70:
+	MOVB	@#(LDB90+6), R0	; does Guidance System working now
+	BNE	LBD85		; yes => Flying away on the Pod
+	MOV	#SE145, R3	; "This Pod cant naviagate. Guidance System is offline"
+	BR	LBCC5		; Show the message/screen, wait for key, continue game main loop
+; Flying away on the Pod
+LBD85:
+	MOVB	#68., @#LDC59	; set delay factor
+	MOVB	#001, @#LDC85	; Use delay and copy screen in LBEDE
+	CLRB	@#LDCF3		; Left margin size for text
+	CLRB	@#LDBF4		; clear counter of achievements
+	MOVB	#14., @#LDCF4	; Line interval for text
+; Showing end-of-story screen
+	CALL	STHEMN		; ScreenThemeNite
+	CALL	BLANK_SCR		; Clear and show shadow screen
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	000000		; zero penRow/penCol
+	.WORD	SE11B		; "The onboard guidance system picks up a ...
+	CALL	WTKEY		; WaitAnyKey
+; Showing statistics screen
+	MOVB	#006, @#LDCF3	; Left margin size for text
+	CALL	CLSHAD		; ClearShadowScreen
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	6014		; penRow/penCol
+	.WORD	SE0A1		; "Items Found (/24): Enemies Killed: PlayerDeaths: Awards:
+	CALL	LBC34		; Delay x20
+	MOV	#3212., R2
+	MOVB	@#LDBC7, R3	; get Items Found count
+	CALL	LB97D		; Draw 5-digit number HL at row/col DE, and show the screen
+	CALL	LBC34		; Delay x20
+	MOV	#15214, R2
+	MOV	@#LDBC5, R3	; get Enemies Killed count
+	CALL	LB97D		; Draw 5-digit number HL at row/col DE, and show the screen
+	CALL	LBC34		; Delay x20
+	MOV	#24214, R2
+	MOV	@#LDBC3, R3	; get Player Deaths count
+	CALL	LB97D		; Draw 5-digit number HL at row/col DE, and show the screen
+	CALL	LBC34		; Delay x20
+	CMPB	#20., @#LDBC7	; 20 or more?
+	BHIS	LBE06		; no => jump
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	51014		; penRow/penCol
+	.WORD	SE0AD		; "Sherlock Holmes" (achievement)
+	INCB	@#LDBF4		; increase counter of achievements
+	BR	LBE12
+LBE06:
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	51014		; penRow/penCol
+	.WORD	SE0AB		; "Sir Miss-A-Lot" (achievement)
+LBE12:
+	MOV	#50., R2
+	MOV	@#LDBC5, R3	; get Enemies Killed count
+	CMP	R2, R3		; Compare HL and DE
+	BHIS	LBE32		; less 50? => jump
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	60014		; penRow/penCol
+	.WORD	SE0B1		; "Terminator" (achievement)
+	INCB	@#LDBF4		; increase counter of achievements
+	BR	LBE3E
+LBE32:
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	60014		; penRow/penCol
+	.WORD	SE0AF		; "Running Scared"
+LBE3E:
+	TST	@#LDBC3		; Player deaths count = 0?
+	BNE	LBE5E
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	67014		; penRow/penCol
+	.WORD	SE0B5		; "Survivor" (achievement)
+	INCB	@#LDBF4		; increase counter of achievements
+	BR	LBE6A
+LBE5E:				; Player deaths > 0
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	67014		; penRow/penCol
+	.WORD	SE0B3		; "Over & Over Again" (achievement)
+LBE6A:
+	CALL	WTKEY		; WaitAnyKey
+	CALL	CLSHAD		; ClearShadowScreen
+	CMP	#003, @#LDBF4	; do we have all three achievements?
+	BNE	LBE8A		; no => skip extended ending
+; Extended ending
+	CLRB	@#LDCF3		; clear Left margin size for text
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	000000		; zero penRow/penCol
+	.WORD	SE11D		; "System Alert triggered: ..."
+	BR	LBE9B
+LBE8A:
+	MOVB	#30., @#LDCF3	; Left margin size for text
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	32024		; penRow/penCol
+	.WORD	SE0A9		; "Earn 3 Good Awards for an Extended Ending!"
+LBE9B:
+	CALL	WTKEY		; WaitAnyKey
+	CALL	CLSHAD		; ClearShadowScreen
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	27106		; penRow/penCol
+	.WORD	SE11F		; "The End"
+	CALL	LBC34		; Delay x20
+	JMP	LBF6F		; The End
+
+; Draw string using LBEDE, with two params are after the CALL
+; param 1: penRow/penCol
+; param 2: string address
+DRSTR3:
+	POP	R3		; R3 = the address right after the CALL
+	MOV	(R3)+, @#PEN_COL	; Set penRow/penCol
+	MOV	(R3)+, R0	; get the string address
+	PUSH	R3		; new return address
+	MOV	R0, R3
+;	JMP	LBEDE		; Show message char-by-char
+;
+; Draw string on the screen char-by-char
+;   R3 = String address
+LBEDE:
+	MOVB	(R3)+, R0
+	BNE	LBEDE1
+	RTS PC
+LBEDE1:	CMPB	R0, #174	; CP 7Ch	; '|' - line end ?
+	BEQ	LBF1B
+	PUSH	R3
+	CALL	DRCHAR
+	MOVB	@#LDC85, R0		; get Delay and copy screen flag
+	BEQ	LBEF91
+	CALL	LB2D0			; Delay
+	CALL	SHOWSC			; Copy shadow screen to UKNC screen
+LBEF91:
+	POP	R3
+	BR	LBEDE
+LBF1B:					; Line end
+	PUSH	R1
+	MOVB	@#PEN_ROW, R1		; Get penRow 0..127
+	MOVB	@#LDCF4, R0		; Line interval for text
+	ADD	R1, R0
+	MOVB	R0, @#PEN_ROW		; Set penRow
+	MOVB	@#LDCF3, @#PEN_COL	; Get left margin size for text -> set penCol
+	POP	R1
+	BR	LBEDE
+;
+; Set variables for Credits
+LBF54:
+	CLRB	@#LDD57		; clear Credits line number
+	CLRB	@#LDD56		; clear Credits counter within one line
+	CLRB	@#LDC85		; Skip delay and copy screen in LBEDE
+	MOVB	#150., @#LDC59	; set delay factor
+	RTS PC
+;
+; Credits menu item selected
+LBF64:
+	CALL	STHEMN		; ScreenThemeNite - switching to dark theme for Credits
+	CALL	BLANK_SCR		; Clear and show shadow screen
+	CALL	LBF54		; Set variables for Credits
+	JMP	LBF81		; Credits screen text scrolls up
+;
+; The End
+;
+LBF6F:
+	CALL	STHEMN		; ScreenThemeNite - switching to dark theme for End and Credits
+	CALL	BLANK_SCR		; Clear and show shadow screen
+	CALL	LBF54		; Set variables for Credits
+	CALL	DRSTR3		; Draw string with LBEDE and params after the call
+	.WORD	027106		; penRow/penCol
+	.WORD	SE11F		; "The End"
+;
+; Credits screen text scrolls up
+;
+LBF81:
+	MOVB	#126., @#PEN_ROW	; Set penRow, to draw new strings on the very bottom
+LBF686:
+	BR	LBF6F4
+LBF6F2:
+	CALL	SHOWSC		; Copy shadow screen to actual screen
+LBF6F3:
+	CALL	GETKEY		; Scan keyboard
+	BNE	CREXIT		; any key pressed => return to main Menu
+	CALL	LBFD5		; Scroll shadow screen up one line
+LBF6F4:
+	MOVB	@#LDD56, R0
+	INC	R0		; increase counter within the line
+	MOVB	R0, @#LDD56
+	CMP	R0, #12.	; last line of the current string?
+	BEQ	CREDS5		; yes => jump
+	CALL	LB2D0		; Delay
+	BR	LBF6F2		; continue the Credits loop
+CREDS5:
+	CLRB	@#LDD56		; clear counter within the line
+	MOVB	@#LDD57, R2
+	ADD	#LDDF2, R2	; Table of left margins for Credits strings
+	MOVB	(R2), @#PEN_COL	; Set penCol
+	MOVB	@#LDD57, R0	; get Credits line number
+	MOV	#LDD58, R3	; Table of Credits strings
+	CALL	LADFF		; Get address from table HL by index A
+	CALL	DRSTR		; Draw string on shadow screen without any delays
+	MOVB	@#LDD57, R0
+	INC	R0		; increase the Credits line counter
+	MOVB	R0, @#LDD57
+	CMP	R0, #76.
+	BNE	LBF6F3
+	CALL	LBA81		; Delay x40 - added to have a pause after the last line
+CREXIT:
+	CALL	STHEML		; ScreenThemeLite - switching to light theme for Main Menu
+	CALL	BLANK_SCR		; Clear and show shadow screen
+	JMP	LBA3D		; Return to main Menu
+;
+; Scroll shadow screen up 1px
+LBFD5:
+	MOV	#SHADOW, R2
+	MOV	#(SHADOW+24.), R3
+	MOV	#414., R1	; 138 * 24 / 8 = 414.
+LBFD51:
+	MOV	(R3)+, (R2)+
+	MOV	(R3)+, (R2)+
+	MOV	(R3)+, (R2)+
+	MOV	(R3)+, (R2)+
+	SOB	R1, LBFD51
+	RTS PC
+
+;----------------------------------------------------------------------------

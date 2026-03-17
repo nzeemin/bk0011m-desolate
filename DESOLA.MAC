@@ -1,0 +1,538 @@
+.extern all
+;------------------------------------------------------------------------------
+; Cheat codes on/off
+
+CHROMN=0		; Show room number at the bottom-left
+CHACCE=0		; All door access codes entered already
+CHAINV=0		; Have all inventory items
+CHWEAP=0		; Have the weapon
+CHELTH=0		; Health 999
+
+;------------------------------------------------------------------------------
+
+TITLETOP = 100000		; Начало экрана (заставка), БК-0011М
+SCRTOP = 110000		; Начало игрового экрана, БК-0011М
+
+MMAPRUN = 5000 ; Карта памяти для работы программы
+MMAPSCR = 4400; Карта памяти для обновления экрана
+
+SYSREG = 177716
+KBSTATUS = 177660
+KBDATA = 177662
+PALREG = 177662
+SCROLLREG =  177664
+
+;------------------------------------------------------------------------------
+
+	.link 1000
+START:
+	MTPS #340
+	TST @#KBDATA
+	MOV #1330, @#SCROLLREG
+
+	CALL	STHEMN		; Установка нужной нам палитры
+	CALL GENUNPACKB		; Создаём таблицу распаковки байтов в слова
+; SCR_TILES уже содержит первые три строки титульного экрана с надписью DESOLATE
+; Получаем теневой экран из тайлов и копируем надпись DESOLATE на экран
+	CALL	CLSHAD			; очистка теневого экрана
+	MOV	#SCR_TILES, R3
+	CALL	DRAW_TILESET2			; Display screen from tiles with Tileset2
+	CALL	CTITLE
+	CALL	CLSHAD			; очистка теневого экрана
+; Запуск
+	CALL	START_TITLES			; Show titles and go to Menu
+
+;.IF NE CHACCE			; Cheat code to get all door access codes
+;	MOV	#<DLLENT+1>, R3
+;	MOV	#4., R1
+;START1:	MOVB	#001, (R3)+
+;	SOB	R1, START1
+;.ENDC
+;.IF NE CHAINV			; Cheat code to have all inventory items
+;	MOV	#LDB9C, R3
+;	MOV	#26., R1
+;START2:	MOVB	#001, (R3)+
+;	SOB	R1, START2
+;.ENDC
+;.IF NE CHWEAP			; Cheat code to have the weapon
+;	MOVB	#001, @#LDCF7
+;.ENDC
+;.IF NE CHELTH			; Cheat code to have health 999
+;	MOV	#999., @#VAR_HP
+;.ENDC
+
+;	CALL	LBA3D		; Menu
+;	CALL	LB0A2		; Inventory
+;	CALL	LBBEC		; Info menu item, show Controls
+;	CALL	LBADE		; New game
+;	CALL	LBB7E		; Game start
+;	CALL	LB9A2		; Player is dead
+;	CALL	LBD85		; Final
+;	CALL	LBF6F		; The End
+;	CALL	LBF81		; Credits
+
+;	CALL	SHOWSC
+
+;	CALL	WTKEY
+
+FINISH:
+	; TODO -- better exit logic
+	MOV @#SYSREG, R0
+	CLRB R0
+	JMP @R0
+
+
+;------------------------------------------------------------------------------
+
+
+; Палитры
+PALETN = 46000	; экран 0, палитра RGC
+PALETL = 47000	; экран 0, палитра YGW
+
+INVMASK:	.WORD 0
+; ScreenThemeNite - switching to dark theme for story mode
+STHEMN:
+	CALL CLS
+	MOV	#PALETN, @#PALREG
+	CLR @#INVMASK
+	RTS PC
+; ScreenThemeLite - switching to light theme
+STHEML:
+	CALL CLS
+	MOV	#PALETL, @#PALREG
+	MOV #177777, @#INVMASK
+	RTS PC
+	; Clear game screen
+CLS:
+	MOV #MMAPSCR, @#SYSREG ; Подключаем экранную страницу
+	CLR R0
+	MOV #SCRTOP, R1
+	MOV #2000, R2 ; 128 lines
+1$:	MOV R0, (R1)+
+	MOV R0, (R1)+
+	MOV R0, (R1)+
+	MOV R0, (R1)+
+	SOB R2, 1$
+	MOV #MMAPRUN, @#SYSREG
+	RTS PC
+	
+; Вернуть стандартную палитру
+;STHEMD:
+;	MOV	#PALETD, @#PPBACP
+;	BR	PPSEND
+
+
+;------------------------------------------------------------------------------
+
+; Подпрограмма: Печать строки: R1 = адрес строки, строка завершается 0; портит R0
+; После завершения R1 указывает на байт следующий за 0
+;PRINT:
+;10$:	MOVB	(R1)+, R0	; Конец строки?
+;	BEQ	RETN		; да => выходим
+;20$:	TSTB	@#177564	; Источник канала 0 готов?
+;	BPL	20$		; нет => ждём
+;	MOV	R0, @#177566	; передаём символ в канал 0
+;	BR	10$
+
+; Подпрограмма: пауза после очистки экрана чтобы ПП закончил работу
+;PAUSE:	; Pause to let PPU finish the previous commands
+;	MOV	#177777, R5
+;1$:	NOP
+;	SOB	R5, 1$
+;RETN:	RTS PC
+
+; Подпрограмма: Ожидание символа с клавиатуры: R0 = полученный символ
+WTKEY:	TSTB	@#KBSTATUS
+	BPL	WTKEY
+	CLR	R0
+	MOVB	@#KBDATA, R0	; символ в R0
+	RTS PC
+; Подпрограмма: Получение символа с клавиатуры: флаг Z=0 = есть символ, R0 = полученный символ
+GETKEY:	TSTB	@#KBSTATUS	; есть символ?
+	BPL	10$		; нет символа => выходим
+	MOVB	@#KBDATA, R0	; символ в R0
+	RTS PC
+10$:	CLR	R0		; возвращаем пустой код клавиши
+	RTS PC
+
+;------------------------------------------------------------------------------
+
+; Wait for any key
+WAITAN:
+	CALL	WAITUP
+	CALL	WTKEY
+	RTS PC
+;
+; Wait until no key pressed - to put after ReadKeyboard calls to prevent double-reads of the same key
+WAITUP:
+	BIT #100, @#SYSREG
+	BNE WAITUP
+	TST @#KBDATA
+	RTS PC
+;
+; Get shadow screen address using penCol in PEN_COL
+;   R0 = row 0..139
+;   (PEN_COL) = penCol 0..191
+; Returns R3 = address
+GSADDR:
+	ASL	R0
+	MOV	R0, R3
+	ASL	R3		; now R3 = row * 4
+	ADD	R0, R3		; now R3 = row * 6
+	ASL	R3		; now R3 = row * 12
+	ASL	R3		; now R3 = row * 24
+;	MOV	MUL24D(R0), R3	; R3 = row * 24
+	ADD	#SHADOW, R3
+	CLR R0
+	BISB	@#PEN_COL, R0	; get penCol
+	ASR	R0
+	ASR	R0
+	ASR	R0		; now A = 8px column
+	ADD	R0, R3		; now R3 = line address + column
+	RTS PC
+
+; Draw tile with mask 16x16 -> 16x16 on shadow screen - for Tileset2 tiles
+;   R3 = row 0..127; R2 = col 0..191; R4 = tile address
+DRTIL2:
+	MOV	R3, R0		; penRow
+	MOV	R2, @#PEN_COL	; penCol
+	CALL	GSADDR		; now R3 = screen addr
+	MOV	#8., R1		; 8 row pairs
+	MOV	#24., R2	; line increment
+DRTILA:
+; 1st line
+	MOV	(R3), R0	; get shadow screen bits
+	BIC	(R4)+, R0	; apply mask
+	BIS	(R4)+, R0	; use pixels
+	MOV	R0, (R3)	; write the result
+	ADD	R2, R3		; next line
+; 2nd line
+	MOV	(R3), R0	; get shadow screen bits
+	BIC	(R4)+, R0	; apply mask
+	BIS	(R4)+, R0	; use pixels
+	MOV	R0, (R3)	; write the result
+	ADD	R2, R3		; next line
+; Contine the loop
+	SOB	R1, DRTILA
+	RTS PC
+
+; Draw string  on shadow screen using FONTPR font
+;   R3 = string addr
+DRSTR1:
+	CALL	DRCHAR
+DRSTR:
+	MOVB	(R3)+, R0
+	BNE	DRSTR1
+	RTS PC
+;
+; Draw decimal number R3 in 5 digits
+DRNUM5:	MOV	#10000., R1
+	CALL	DRNUM1
+	MOV	#1000., R1
+	CALL	DRNUM1
+; Draw decimal number R3 in 3 digits
+DRNUM3:	MOV	#100., R1
+	CALL	DRNUM1
+	MOV	#10., R1
+	CALL	DRNUM1
+	MOV	#1., R1
+DRNUM1:	MOV	#57, R0
+DRNUM2:	INC	R0
+	SUB	R1, R3
+	BHIS	DRNUM2
+	ADD	R1, R3
+;	JMP	DRCHAR
+;
+; Draw character on the screen using FONTPR font
+;   R0 = character to show: $00-$1F space with R0 width; $20 space
+; Preserves: R1, R3
+DRCHAR:
+	PUSH	R3		;   push hl
+	PUSH	R1		;   push bc
+	CMPB	R0, #040	;   cp $20        ; $00-$1F ?
+	BLO	DRCH00		;   jr c,DrawChar_00  ; yes => set char width and process like space char
+	BNE	DRCHR0		;   jr nz,DrawChar_0  ; not space char => jump
+	MOV	#003, R0	;   ld a,$03      ; space char gap size
+DRCH00:				; DrawChar_00:
+	MOVB	R0, @#DRCHRW	;   ld (DrawChar_width),a
+	BR	DRCHRF		;   jp DrawChar_fin
+DRCHR0:				; DrawChar_0:
+	CMPB	R0, #047	;   cp $27        ; char less than apostroph?
+	BHIS	DRCHR1		;   jr nc,DrawChar_1
+	ADD	#072, R0	;   add a,$3A     ; for '!', quotes, '#' '$' '%' '&'
+	BR	DRCHR2		;   jr DrawChar_2
+DRCHR1:				; DrawChar_1:
+	CMPB	R0, #052	;   cp $2A        ; char less than '*'?
+	BHIS	DRCHR2		;   jr nc,DrawChar_2
+	ADD	#025, R0	;   add a,$15     ; for apostroph, '(' ')' chars
+DRCHR2:	SUB	#054, R0	;   sub $2C       ; font starts from ','
+	MOV	R0, R2 		;   ld e,a / ld l,a  ; calculating the symbol address
+	ADD	R2, R2		;   add hl,hl     ; now hl = a * 2
+	ADD	R2, R2		;   add hl,hl     ; now hl = a * 4
+	ADD	R0, R2		;   add hl,de     ; now hl = a * 5
+	ADD	R2, R2		;   add hl,hl     ; now hl = a * 10
+	ADD	R0, R2		;   add hl,de     ; now hl = a * 11
+	ADD	#FONTPR, R2	;   ld de,FontProto / add hl,de / ex de,hl      ; now de=symbol addr
+	CLR	R0		;NOTE: Номер строки может быть больше 127!
+	BISB	@#PEN_ROW, R0	;   ld a,(PEN_ROW)  ; get penRow
+	MOV	R0, @#DRCHRO	;   ld (DrawChar_row),a
+	MOVB	(R2)+, R0	;   ld a,(de) / inc de     ; get flag/width byte
+	TSTB	R0		;   bit 7,a       ; lowered symbol?
+	BPL	DRCHR3		;   jr z,DrawChar_3
+	INC	@#DRCHRO	;   ld hl,DrawChar_row / inc (hl)      ; start on the next line
+DRCHR3:				; DrawChar_3:
+	BIC	#177760, R0	;   and $0f       ; keep width 1..8
+	ADD	#002, R0	;   add a,$02     ; gap 2px after the symbol
+	MOVB	R0, @#DRCHRW	;   ld (DrawChar_width),a
+	MOV	@#DRCHRO, R0	;   ld a,(DrawChar_row)
+	CALL	GSADDR		;   call GetScreenAddr
+	PUSH	R3		;   push hl       ; store addr on the screen
+	PUSH	R2		;   push de       ; store symbol data addr
+	MOVB	@#PEN_COL, R0	;   ld a,(PEN_COL)  ; get penCol
+	BIC	#177770, R0	;   and $07       ; shift 0..7
+	INC	R0		;   inc a
+	MOV	R0, R4		;   ld c,a
+	MOV	#10., R1	;   ld b,10       ; 10 lines
+DRCHR4:	PUSH	R4		; DrawChar_4:     ; loop by lines
+	PUSH	R1		;   push bc       ; save counter
+	MOVB	(R2)+, R0	;   ld a,(de) / inc de
+DRCHR5:				; DrawChar_5:     ; loop for shift
+	DEC	R4		;   dec c
+	BEQ	DRCHR6		;   jr z, DrawChar_6
+	ASL	R0		;   srl a         ; shift right
+	BR	DRCHR5		;   jr DrawChar_5
+DRCHR6:				; DrawChar_6:
+	BISB	R0, (R3)	;   or (hl) / ld (hl),a     ; put on the screen
+	MOV	@#DRCHRO, R0	;   ld a,(DrawChar_row)
+	INC	R0		;   inc a
+	MOV	R0, @#DRCHRO	;   ld (DrawChar_row),a
+	CALL	GSADDR		;   call GetScreenAddr
+	POP	R1		;   pop bc        ; restore counter and shift
+	POP	R4
+	SOB	R1, DRCHR4	;   djnz DrawChar_4
+	POP	R2		;   pop de        ; restore symbol data addr
+	POP	R3		;   pop hl        ; restore addr on the screen
+	MOVB	@#PEN_COL, R0	;   ld a,(PEN_COL)  ; get penCol
+	BIC	#177770, R0	;   and $7        ; shift 0..7
+	MOV	R0, R1		;   ld b,a
+	MOVB	@#DRCHRW, R0	;   ld a,(DrawChar_width)
+	ADD	R1, R0		;   add a,b
+	CMPB	R0, #010	;   cp $08        ; shift + width <= 8 ?
+	BLO	DRCHRF		;   jr c,DrawChar_fin	; yes => no need for 2nd pass
+; Second pass
+	MOVB	@#PEN_COL, R0	;   ld a,(PEN_COL)  ; get penCol
+	BIC	#177770, R0	;   and $07       ; shift 1..7
+	SUB	#8., R0		;   sub $08
+	COM	R0		;   neg           ; a = 8 - shift; result is 1..7
+	INC	R0		;   inc a
+	INC	R0
+	MOV	R0, R4		;   ld c,a
+	MOV	@#DRCHRO, R0	;   ld a,(DrawChar_row)
+	SUB	#10., R0	;   add a,-10
+	MOV	R0, @#DRCHRO	;   ld (DrawChar_row),a
+	INC	R3		;   inc hl
+	MOV	#10.,R1		;   ld b,10       ; 10 lines
+DRCHR8:	PUSH	R4		; DrawChar_8:     ; loop by lines
+	PUSH	R1		;   push bc       ; save counter
+	MOVB	(R2)+, R0	;   ld a,(de) / inc de
+	BIC	#177400, R0
+DRCHR9:				; DrawChar_9:     ; loop for shift
+	DEC	R4		;   dec c
+	BEQ	DRCHRA		;   jr z, DrawChar_A
+	ASR	R0		;   sla a         ; shift left
+	BR	DRCHR9		;   jr DrawChar_9
+DRCHRA:				; DrawChar_A:
+	BISB	R0, (R3)	;   or (hl) / ld (hl),a     ; put on the screen
+	MOV	@#DRCHRO, R0	;   ld a,(DrawChar_row)
+	INC	R0		;   inc a
+	MOV	R0, @#DRCHRO	;   ld (DrawChar_row),a
+	CALL	GSADDR		;   call GetScreenAddr
+	INC	R3		;   inc hl
+	POP	R1		;   pop bc        ; restore counter
+	POP	R4
+	SOB	R1, DRCHR8	;   djnz DrawChar_8
+DRCHRF:				; DrawChar_fin:   ; All done, finalizing
+	MOV	#PEN_COL, R3	;   ld hl,PEN_COL   ; penCol address
+	MOVB	@#DRCHRW, R0	;   ld a,(DrawChar_width)
+	MOVB	(R3), R5	;   add a,(hl)
+	BIC	#177400, R5
+	ADD	R5, R0
+	MOVB	R0, (R3)	;   ld (hl),a     ; updating penCol
+	POP	R1		;   pop bc
+	POP	R3		;   pop hl
+	RTS PC			;   ret
+DRCHRO:	.WORD	0		; DrawChar_row:     DB 0    ; Saved current row number
+DRCHRW:	.BYTE	0		; DrawChar_width:   DB 0    ; Saved symbol width
+	.EVEN
+
+; Copy DESOLATE title from Main Menu shadow screen to actual screen
+CTITLE:
+	MOV #MMAPSCR, @#SYSREG ; Подключаем экранную страницу
+	MOV	#(SHADOW+192.), R2
+	MOV	#TITLETOP + 8., R4		; Адрес в ВОЗУ
+	MOV	#30., R3		; количество строк
+CTITL1:	MOV	#24., R5		; 24. колонки в строке
+CTITL2:
+	; берём 8 пикселов
+	CLR R0
+	BISB (R2)+, R0 
+	; распаковываем в R1 цветом 2
+	ASL R0
+	MOV UNPACKB(R0), R1
+	BIC #52525, R1
+
+	MOV R1, (R4)+ ;   пишем в ВОЗУ
+	SOB	R5, CTITL2		; Конец цикла по строке
+	ADD	#16. , R4		; к следующей строке экрана
+	SOB	R3, CTITL1		; Конец цикла по строкам
+	
+	MOV #MMAPRUN, @#SYSREG ; Отключаем экранную страницу
+	RTS PC
+;
+; Copy shadow screen 24*128=3072 bytes to actual screen
+; ShowShadowScreen:
+SHOWSC:
+	MOV #MMAPSCR, @#SYSREG ; Подключаем экранную страницу
+	MOV @#INVMASK, R1
+	MOV	#SHADOW, R2
+	MOV	#SCRTOP + 8., R4		; Адрес в ВОЗУ
+	MOV	#128., R3		; количество строк
+SHOWS1: 				; Начало цикла по строкам
+	MOV	#24., R5			; 24. колонки в строке
+SHOWS2:					; Начало цикла по строке
+	; берём 8 пикселов
+	CLR R0
+	BISB (R2)+, R0 
+	; распаковываем в ВОЗУ цветом 3
+	ASL R0
+	MOV UNPACKB(R0), R0
+	XOR R1, R0
+	MOV R0, (R4)+
+	SOB	R5, SHOWS2		; Конец цикла по строке
+	ADD	#16., R4		; к следующей строке экрана
+	SOB	R3, SHOWS1		; Конец цикла по строкам
+	MOV #MMAPRUN, @#SYSREG ; Отключаем экранную страницу
+	RTS PC
+
+; Clear block on the shadow screen
+;   R3=row/col, R2=rows/cols
+;   columns are 8px wide; rows=1..128, row=0..127; col=0..23, cols=1..24
+CLBLK:
+	PUSH	R0
+	PUSH	R1
+	PUSH	R4
+	MOV	R3, R4
+	SWAB	R4
+	BIC	#177400, R4		; row 0..127
+	BIC	#177400, R3		; col 0..23
+	MOV	R2, R1
+	SWAB	R1
+	BIC	#177400, R1		; rows 1..128
+	BIC	#177400, R2		; cols 1..24
+	MOV	R4, R0
+	ADD	R4, R4			; now R4 = row * 2
+	ADD	R0, R4			; now R4 = row * 3
+	ADD	R4, R4
+	ADD	R4, R4
+	ADD	R4, R4			; now R4 = row * 24
+	ADD	R3, R4			; now R4 = row * 24 + col
+	ADD	#SHADOW, R4		; now R4 = start address
+CLBLK1:	PUSH	R4
+	MOV	R2, R0
+CLBLK2: CLRB	(R4)+
+	;MOVB	#201, (R4)+
+	SOB	R0, CLBLK2
+	POP	R4
+	ADD	#24., R4
+	SOB	R1, CLBLK1
+	POP	R4
+	POP	R1
+	POP	R0
+	RTS PC
+
+; Routine: Get pseudo-random number, result in R3
+; (copied from uknc-highwayencounter code)
+RANDOM:
+	MOV	RANDSD, R2	; A270	LD DE,($5C76)	; Read RND SEED variable
+	MOV	R2, R3		; A274	LD H,E
+	SWAB	R3
+	BIC	#377, R3
+	ADD	#375, R3	; A275	LD L,$FD
+	MOV	R2, R0		; A277	LD A,D
+	SWAB	R0
+	BIC	#177400, R0	; A278	OR A
+	SUB	R2, R3		; A279	SBC HL,DE
+	SBCB	R0		; A27B	SBC A,$00
+	SUB	R2, R3		; A27D	SBC HL,DE
+	SBCB	R0		; A27F	SBC A,$00
+				; A281	LD E,A
+	BIC	#177400, R0	; A282	LD D,$00
+	SUB	R0, R3		; A284	SBC HL,DE
+	BHIS	LA289		; A286	JR NC,$A289
+	INC	R3		; A288	INC HL
+LA289:	MOV	R3, RANDSD	; A289	LD ($5C76),HL	; Write RND SEED variable
+	RTS PC			; A28C	RET
+RANDSD:	.WORD	123456		; Pseudo-random seed
+;
+; Get random number 0..7
+RAND8:
+	CALL	RANDOM
+	MOV	R3, R0
+	BIC	#177770, R0
+RAND8R:	RTS PC
+;
+; Get random number 0..10 for door access codes
+; value 10 is for '-' char and we made its probability lower by 1/3
+RAND11:
+	CALL	RANDOM
+	MOV	R3, R0
+	BIC	#177740, R0
+RAND1A:	CMP	R0, #11.
+	BLO	RAND8R
+	SUB	#11., R0
+	BR	RAND1A
+
+; Generate byte unpacking table
+GENUNPACKB:
+	MOV #UNPACKB + 512., R2
+	MOV #255. , R3
+2$:
+	MOV R3, R0
+	MOV #8. , R4
+1$:	ASR R0
+	ROR R1
+	ASR R1
+	SOB R4, 1$
+	MOV R1, -(R2)
+	SOB R3, 2$
+	RTS PC
+;------------------------------------------------------------------------------
+
+; Shadow screen, 192 x 140 pixels
+;   12*2*(64*2+12) = 3360 bytes
+SHADOW:
+	.BLKB	3360.
+; Table to unpack bytes to words
+UNPACKB:
+	.BLKW 256.
+;------------------------------------------------------------------------------
+
+.INCLUDE /DESOLB.MAC/
+
+.INCLUDE /DESOLD.MAC/
+
+.INCLUDE /DESOLF.MAC/
+
+.INCLUDE /DESOLS.MAC/
+
+.INCLUDE /DESOLT.MAC/
+
+.EVEN
+
+
+;------------------------------------------------------------------------------
+
+;STACK:	.BLKW	60		; Под стек
+
+;------------------------------------------------------------------------------
+	.END	START
