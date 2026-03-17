@@ -1,4 +1,4 @@
-#bk0011m-desolate Desolate game BK-0011M version
+# bk0011m-desolate Desolate game BK-0011M version
 
 Adaptation of the UKNC version for the BK-0011M soviet home/educational computer. Since both machines are compatible with
 DEC PDP-11/03 and feature a pixel-addressable graphical display, adaptation was fairly trivial.
